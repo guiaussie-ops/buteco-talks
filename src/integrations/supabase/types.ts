@@ -220,6 +220,7 @@ export type Database = {
         Args: { _server_id: string; _user_id: string }
         Returns: boolean
       }
+      join_server_by_code: { Args: { _code: string }; Returns: string }
       shares_server_with: {
         Args: { _me: string; _other: string }
         Returns: boolean
