@@ -14,13 +14,216 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      channels: {
+        Row: {
+          created_at: string
+          id: string
+          kind: string
+          name: string
+          position: number
+          server_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          kind?: string
+          name: string
+          position?: number
+          server_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          kind?: string
+          name?: string
+          position?: number
+          server_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channels_server_id_fkey"
+            columns: ["server_id"]
+            isOneToOne: false
+            referencedRelation: "servers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      messages: {
+        Row: {
+          channel_id: string
+          content: string
+          created_at: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          channel_id: string
+          content: string
+          created_at?: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          channel_id?: string
+          content?: string
+          created_at?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "channels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          birth_date: string | null
+          created_at: string
+          display_name: string
+          id: string
+          username: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          birth_date?: string | null
+          created_at?: string
+          display_name: string
+          id: string
+          username: string
+        }
+        Update: {
+          avatar_url?: string | null
+          birth_date?: string | null
+          created_at?: string
+          display_name?: string
+          id?: string
+          username?: string
+        }
+        Relationships: []
+      }
+      server_members: {
+        Row: {
+          id: string
+          joined_at: string
+          role: string
+          server_id: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          joined_at?: string
+          role?: string
+          server_id: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          joined_at?: string
+          role?: string
+          server_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "server_members_server_id_fkey"
+            columns: ["server_id"]
+            isOneToOne: false
+            referencedRelation: "servers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      servers: {
+        Row: {
+          created_at: string
+          icon_emoji: string
+          id: string
+          invite_code: string
+          name: string
+          owner_id: string
+        }
+        Insert: {
+          created_at?: string
+          icon_emoji?: string
+          id?: string
+          invite_code?: string
+          name: string
+          owner_id: string
+        }
+        Update: {
+          created_at?: string
+          icon_emoji?: string
+          id?: string
+          invite_code?: string
+          name?: string
+          owner_id?: string
+        }
+        Relationships: []
+      }
+      voice_participants: {
+        Row: {
+          camera_on: boolean
+          channel_id: string
+          id: string
+          joined_at: string
+          muted: boolean
+          screen_sharing: boolean
+          user_id: string
+        }
+        Insert: {
+          camera_on?: boolean
+          channel_id: string
+          id?: string
+          joined_at?: string
+          muted?: boolean
+          screen_sharing?: boolean
+          user_id: string
+        }
+        Update: {
+          camera_on?: boolean
+          channel_id?: string
+          id?: string
+          joined_at?: string
+          muted?: boolean
+          screen_sharing?: boolean
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "voice_participants_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "channels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      channel_server_id: { Args: { _channel_id: string }; Returns: string }
+      is_adult: { Args: { _user_id: string }; Returns: boolean }
+      is_server_member: {
+        Args: { _server_id: string; _user_id: string }
+        Returns: boolean
+      }
+      is_server_owner: {
+        Args: { _server_id: string; _user_id: string }
+        Returns: boolean
+      }
+      shares_server_with: {
+        Args: { _me: string; _other: string }
+        Returns: boolean
+      }
     }
     Enums: {
       [_ in never]: never
