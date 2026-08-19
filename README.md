@@ -1,14 +1,18 @@
-# Welcome to your Lovable project
+# Buteco Talks
+
+Vamos criar um app estilo o discord!
+
+No Brasil o discord tem sido censurado então eu gostaria de criar algo para poder ter um Discord like com meus amigos, poder compartilhar telas, resolviamos muitos problemas auxiliando um ao outro ao compartilhar tela!!
 
 This project was built with [Lovable](https://lovable.dev).
 
 ## Build with Lovable
 
-Open your project in the [Lovable editor](https://lovable.dev) and keep building.
+Continue developing this project in the [Lovable editor](https://lovable.dev/projects/d79e6c6b-d8b0-4eb6-8b23-d4ca21821e48).
 
 - **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: connect the project to GitHub and every change made in Lovable is committed straight to your repository.
-- **Full ownership**: this code is yours. Push to your repository and your changes sync back into Lovable, ready for your next prompt.
+- **Stay in sync**: every change made in Lovable is committed straight to this repository.
+- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
 
 ## Development
 
@@ -20,10 +24,3 @@ cd <repository-name>
 npm i
 npm run dev
 ```
-
-## Built with
-
-- TanStack Start
-- TypeScript
-- React
-- Tailwind CSS
