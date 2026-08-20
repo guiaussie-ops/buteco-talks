@@ -77,7 +77,7 @@ function AuthPage() {
       return;
     }
     setLoading(true);
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
       password,
       options: {
@@ -98,9 +98,15 @@ function AuthPage() {
       );
       return;
     }
+    if (!data.session) {
+      toast.success("Conta criada! Confirme o e-mail que enviamos para poder entrar.");
+      setMode("signin");
+      return;
+    }
     toast.success("Conta criada! Bem-vindo à Praça.");
     void navigate({ to: "/app" });
   };
+
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-10">
