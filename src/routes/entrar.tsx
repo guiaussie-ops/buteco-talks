@@ -31,6 +31,7 @@ function AuthPage() {
   const navigate = useNavigate();
   const { session } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [tab, setTab] = useState("login");
 
   useEffect(() => {
     if (session) void navigate({ to: "/app" });
@@ -100,7 +101,7 @@ function AuthPage() {
     }
     if (!data.session) {
       toast.success("Conta criada! Confirme o e-mail que enviamos para poder entrar.");
-      setMode("signin");
+      setTab("login");
       return;
     }
     toast.success("Conta criada! Bem-vindo à Praça.");
@@ -119,7 +120,7 @@ function AuthPage() {
         </Link>
 
         <div className="bg-card border-border rounded-2xl border p-6">
-          <Tabs defaultValue="login">
+          <Tabs value={tab} onValueChange={setTab}>
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="login">Entrar</TabsTrigger>
               <TabsTrigger value="signup">Criar conta</TabsTrigger>
