@@ -1,0 +1,324 @@
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/lib/auth";
+import { ServerRail, type ServerItem } from "@/components/app/ServerRail";
+import { ChannelSidebar, type Channel } from "@/components/app/ChannelSidebar";
+import { ChatPanel } from "@/components/app/ChatPanel";
+import { VoicePanel } from "@/components/app/VoicePanel";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
+export const Route = createFileRoute("/app")({
+  ssr: false,
+  head: () => ({
+    meta: [
+      { title: "Minhas comunidades — Praça" },
+      {
+        name: "description",
+        content: "Converse por texto, entre em salas de voz e compartilhe sua tela com seus amigos.",
+      },
+      { property: "og:title", content: "Minhas comunidades — Praça" },
+      {
+        property: "og:description",
+        content: "Converse por texto, entre em salas de voz e compartilhe sua tela com seus amigos.",
+      },
+      { name: "robots", content: "noindex" },
+    ],
+  }),
+  component: AppPage,
+});
+
+type ServerFull = ServerItem & { invite_code: string };
+
+function AppPage() {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const { session, profile, loading, isAdult, signOut } = useAuth();
+  const uid = session?.user.id ?? null;
+
+  const [activeServerId, setActiveServerId] = useState<string | null>(null);
+  const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [joinOpen, setJoinOpen] = useState(false);
+  const [serverName, setServerName] = useState("");
+  const [inviteInput, setInviteInput] = useState("");
+
+  useEffect(() => {
+    if (!loading && !session) void navigate({ to: "/entrar" });
+  }, [loading, session, navigate]);
+
+  const serversQuery = useQuery({
+    queryKey: ["servers", uid],
+    enabled: !!uid,
+    queryFn: async (): Promise<ServerFull[]> => {
+      const { data, error } = await supabase
+        .from("server_members")
+        .select("server:servers(id, name, icon_emoji, owner_id, invite_code)")
+        .eq("user_id", uid!);
+      if (error) throw error;
+      return (data ?? [])
+        .map((r) => r.server as unknown as ServerFull)
+        .filter(Boolean)
+        .sort((a, b) => a.name.localeCompare(b.name));
+    },
+  });
+
+  const servers = useMemo(() => serversQuery.data ?? [], [serversQuery.data]);
+  const activeServer = servers.find((s) => s.id === activeServerId) ?? null;
+
+  useEffect(() => {
+    if (!activeServerId && servers.length > 0) setActiveServerId(servers[0]!.id);
+  }, [servers, activeServerId]);
+
+  const channelsQuery = useQuery({
+    queryKey: ["channels", activeServerId],
+    enabled: !!activeServerId,
+    queryFn: async (): Promise<Channel[]> => {
+      const { data, error } = await supabase
+        .from("channels")
+        .select("id, name, kind, server_id")
+        .eq("server_id", activeServerId!)
+        .order("kind", { ascending: true })
+        .order("name", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as Channel[];
+    },
+  });
+
+  const channels = useMemo(() => channelsQuery.data ?? [], [channelsQuery.data]);
+
+  useEffect(() => {
+    if (!activeServerId) return;
+    if (activeChannel && activeChannel.server_id === activeServerId) return;
+    const first = channels.find((c) => c.kind === "text") ?? channels[0] ?? null;
+    setActiveChannel(first);
+  }, [channels, activeServerId, activeChannel]);
+
+  const membersQuery = useQuery({
+    queryKey: ["members", activeServerId],
+    enabled: !!activeServerId,
+    queryFn: async (): Promise<Record<string, string>> => {
+      const { data: members, error } = await supabase
+        .from("server_members")
+        .select("user_id")
+        .eq("server_id", activeServerId!);
+      if (error) throw error;
+      const ids = (members ?? []).map((m) => m.user_id);
+      if (ids.length === 0) return {};
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, display_name, username")
+        .in("id", ids);
+      const map: Record<string, string> = {};
+      (profiles ?? []).forEach((p) => {
+        map[p.id] = p.display_name || p.username;
+      });
+      return map;
+    },
+  });
+
+  const names = membersQuery.data ?? {};
+
+  const createServer = useMutation({
+    mutationFn: async (name: string) => {
+      const { data: server, error } = await supabase
+        .from("servers")
+        .insert({ name, owner_id: uid!, icon_emoji: name.slice(0, 1).toUpperCase() })
+        .select("id")
+        .single();
+      if (error) throw error;
+      const { error: memberError } = await supabase
+        .from("server_members")
+        .insert({ server_id: server.id, user_id: uid!, role: "owner" });
+      if (memberError) throw memberError;
+      const { error: channelError } = await supabase.from("channels").insert([
+        { server_id: server.id, name: "geral", kind: "text" },
+        { server_id: server.id, name: "sala-de-tela", kind: "voice" },
+      ]);
+      if (channelError) throw channelError;
+      return server.id as string;
+    },
+    onSuccess: async (id) => {
+      await qc.invalidateQueries({ queryKey: ["servers", uid] });
+      setActiveServerId(id);
+      setActiveChannel(null);
+      setCreateOpen(false);
+      setServerName("");
+      toast.success("Comunidade criada!");
+    },
+    onError: () => toast.error("Não consegui criar a comunidade."),
+  });
+
+  const joinServer = useMutation({
+    mutationFn: async (code: string) => {
+      const { data, error } = await supabase.rpc("join_server_by_code", { _code: code.trim().toLowerCase() });
+      if (error) throw error;
+      return data as string;
+    },
+    onSuccess: async (id) => {
+      await qc.invalidateQueries({ queryKey: ["servers", uid] });
+      setActiveServerId(id);
+      setActiveChannel(null);
+      setJoinOpen(false);
+      setInviteInput("");
+      toast.success("Você entrou na comunidade!");
+    },
+    onError: () => toast.error("Convite inválido."),
+  });
+
+  const createChannel = async (name: string, kind: "text" | "voice") => {
+    const { error } = await supabase.from("channels").insert({ server_id: activeServerId!, name, kind });
+    if (error) {
+      toast.error("Não consegui criar o canal.");
+      return;
+    }
+    await qc.invalidateQueries({ queryKey: ["channels", activeServerId] });
+  };
+
+  if (loading || !session || !profile) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-muted-foreground text-sm">Carregando...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-screen overflow-hidden">
+      <ServerRail
+        servers={servers}
+        activeId={activeServerId}
+        onSelect={(id) => {
+          setActiveServerId(id);
+          setActiveChannel(null);
+        }}
+        onCreate={() => setCreateOpen(true)}
+        onJoin={() => setJoinOpen(true)}
+      />
+
+      {activeServer ? (
+        <>
+          <ChannelSidebar
+            serverName={activeServer.name}
+            inviteCode={activeServer.invite_code}
+            channels={channels}
+            activeChannelId={activeChannel?.id ?? null}
+            onSelect={setActiveChannel}
+            isOwner={activeServer.owner_id === uid}
+            onCreateChannel={createChannel}
+            displayName={profile.display_name || profile.username}
+            isAdult={isAdult}
+            onSignOut={() => void signOut()}
+          />
+          {activeChannel ? (
+            activeChannel.kind === "voice" ? (
+              <VoicePanel
+                key={activeChannel.id}
+                channelId={activeChannel.id}
+                channelName={activeChannel.name}
+                userId={uid!}
+                isAdult={isAdult}
+                names={names}
+                onLeave={() => {
+                  const text = channels.find((c) => c.kind === "text");
+                  setActiveChannel(text ?? null);
+                }}
+              />
+            ) : (
+              <ChatPanel
+                key={activeChannel.id}
+                channelId={activeChannel.id}
+                channelName={activeChannel.name}
+                userId={uid!}
+                names={names}
+              />
+            )
+          ) : (
+            <div className="text-muted-foreground flex flex-1 items-center justify-center text-sm">
+              Selecione um canal
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+          <h1 className="font-display text-2xl font-semibold">Você ainda não tem comunidades</h1>
+          <p className="text-muted-foreground max-w-sm text-sm">
+            Crie a sua comunidade e convide a galera, ou entre em uma usando um código de convite.
+          </p>
+          <div className="flex gap-2">
+            <Button onClick={() => setCreateOpen(true)}>Criar comunidade</Button>
+            <Button variant="outline" onClick={() => setJoinOpen(true)}>
+              Usar convite
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Criar comunidade</DialogTitle>
+            <DialogDescription>
+              Ela já vem com um canal de texto e uma sala de voz com compartilhamento de tela.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="server-name">Nome da comunidade</Label>
+            <Input
+              id="server-name"
+              value={serverName}
+              onChange={(e) => setServerName(e.target.value)}
+              placeholder="Turma do suporte"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => createServer.mutate(serverName.trim())}
+              disabled={!serverName.trim() || createServer.isPending}
+            >
+              {createServer.isPending ? "Criando..." : "Criar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={joinOpen} onOpenChange={setJoinOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Entrar com convite</DialogTitle>
+            <DialogDescription>Cole o código que seu amigo enviou.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="invite">Código de convite</Label>
+            <Input
+              id="invite"
+              value={inviteInput}
+              onChange={(e) => setInviteInput(e.target.value)}
+              placeholder="a1b2c3d4e5"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => joinServer.mutate(inviteInput)}
+              disabled={!inviteInput.trim() || joinServer.isPending}
+            >
+              {joinServer.isPending ? "Entrando..." : "Entrar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
