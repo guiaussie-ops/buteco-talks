@@ -12,15 +12,15 @@ import { ShieldCheck } from "lucide-react";
 export const Route = createFileRoute("/entrar")({
   head: () => ({
     meta: [
-      { title: "Entrar na Praça" },
+      { title: "Puxar uma cadeira — Buteco" },
       {
         name: "description",
-        content: "Acesse sua conta ou crie uma nova para participar das comunidades da Praça.",
+        content: "Entre na sua conta ou crie a sua para participar dos butecos da sua turma.",
       },
-      { property: "og:title", content: "Entrar na Praça" },
+      { property: "og:title", content: "Puxar uma cadeira — Buteco" },
       {
         property: "og:description",
-        content: "Acesse sua conta ou crie uma nova para participar das comunidades da Praça.",
+        content: "Entre na sua conta ou crie a sua para participar dos butecos da sua turma.",
       },
     ],
   }),
@@ -100,29 +100,29 @@ function AuthPage() {
       return;
     }
     if (!data.session) {
-      toast.success("Conta criada! Confirme o e-mail que enviamos para poder entrar.");
+      toast.success("Conta criada! Confirme o e-mail que mandamos pra poder puxar a cadeira.");
       setTab("login");
       return;
     }
-    toast.success("Conta criada! Bem-vindo à Praça.");
+    toast.success("Conta criada! Bem-vindo ao Buteco.");
     void navigate({ to: "/app" });
   };
 
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-4 py-10">
-      <div className="w-full max-w-md">
-        <Link to="/" className="mb-8 flex items-center justify-center gap-2">
-          <div className="bg-gradient-neon flex size-9 items-center justify-center rounded-xl text-lg font-bold text-primary-foreground">
-            P
-          </div>
-          <span className="font-display text-lg font-semibold">Praça</span>
+    <main className="bar-vignette relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-10">
+      <div className="bar-glow pointer-events-none absolute inset-x-0 top-0 h-96" />
+      <div className="relative w-full max-w-md">
+        <Link to="/" className="mb-8 flex items-center justify-center">
+          <span className="neon-sign font-display text-4xl leading-none tracking-[0.14em]">
+            BUTECO
+          </span>
         </Link>
 
-        <div className="bg-card border-border rounded-2xl border p-6">
+        <div className="wood-texture border-border rounded-2xl border p-6 shadow-2xl">
           <Tabs value={tab} onValueChange={setTab}>
             <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="login">Entrar</TabsTrigger>
+              <TabsTrigger value="login">Puxar cadeira</TabsTrigger>
               <TabsTrigger value="signup">Criar conta</TabsTrigger>
             </TabsList>
 
@@ -150,7 +150,7 @@ function AuthPage() {
                   />
                 </div>
                 <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? "Entrando..." : "Entrar"}
+                  {loading ? "Entrando..." : "Puxar uma cadeira"}
                 </Button>
               </form>
             </TabsContent>
@@ -159,7 +159,7 @@ function AuthPage() {
               <form onSubmit={handleSignup} className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
-                    <Label htmlFor="display-name">Nome</Label>
+                    <Label htmlFor="display-name">Apelido</Label>
                     <Input
                       id="display-name"
                       required
@@ -191,7 +191,7 @@ function AuthPage() {
                   />
                   <p className="text-muted-foreground flex items-start gap-1.5 text-xs">
                     <ShieldCheck className="text-primary mt-0.5 size-3.5 shrink-0" />
-                    Usada só para liberar câmera e compartilhamento de tela a partir dos 18 anos.
+                    Usada só pra liberar câmera e compartilhamento de tela a partir dos 18 anos.
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -216,7 +216,7 @@ function AuthPage() {
                   />
                 </div>
                 <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? "Criando..." : "Criar conta"}
+                  {loading ? "Criando..." : "Criar minha conta"}
                 </Button>
               </form>
             </TabsContent>

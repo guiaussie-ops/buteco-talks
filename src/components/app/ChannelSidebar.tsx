@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Bottlecap } from "@/components/Bottlecap";
 
 export type Channel = { id: string; name: string; kind: string; server_id: string };
 
@@ -62,7 +62,7 @@ export function ChannelSidebar({
 
   const renderGroup = (label: string, list: Channel[], Icon: typeof Hash) => (
     <div className="mb-4">
-      <p className="text-muted-foreground mb-1 px-2 text-[11px] font-semibold tracking-wider uppercase">
+      <p className="text-muted-foreground mb-1 px-2 text-[11px] font-semibold tracking-[0.16em] uppercase">
         {label}
       </p>
       {list.map((c) => (
@@ -70,29 +70,29 @@ export function ChannelSidebar({
           key={c.id}
           onClick={() => onSelect(c)}
           className={cn(
-            "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+            "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors",
             activeChannelId === c.id
-              ? "bg-surface-2 text-foreground"
-              : "text-muted-foreground hover:bg-surface hover:text-foreground",
+              ? "bg-surface-2 text-primary"
+              : "text-muted-foreground hover:bg-surface-2/60 hover:text-foreground",
           )}
         >
           <Icon className="size-4 shrink-0" />
           <span className="truncate">{c.name}</span>
         </button>
       ))}
-      {list.length === 0 && <p className="text-muted-foreground px-2 py-1 text-xs">Nenhum canal</p>}
+      {list.length === 0 && <p className="text-muted-foreground px-2 py-1 text-xs">Nenhuma mesa</p>}
     </div>
   );
 
   return (
-    <aside className="bg-surface flex h-full w-60 shrink-0 flex-col border-r border-border">
+    <aside className="wood-texture border-border flex h-full w-60 shrink-0 flex-col border-r">
       <div className="border-border flex h-14 items-center justify-between gap-2 border-b px-4">
-        <h2 className="truncate font-display text-sm font-semibold">{serverName}</h2>
+        <h2 className="font-display truncate text-lg tracking-wide">{serverName}</h2>
         {inviteCode && (
           <button
             onClick={() => {
               void navigator.clipboard.writeText(inviteCode);
-              toast.success("Código de convite copiado: " + inviteCode);
+              toast.success("Convite copiado: " + inviteCode);
             }}
             className="text-muted-foreground hover:text-primary shrink-0"
             title="Copiar convite"
@@ -103,27 +103,23 @@ export function ChannelSidebar({
       </div>
 
       <div className="scrollbar-thin flex-1 overflow-y-auto p-2">
-        {renderGroup("Canais de texto", text, Hash)}
-        {renderGroup("Voz e tela", voice, Volume2)}
+        {renderGroup("Mesas de texto", text, Hash)}
+        {renderGroup("Mesas de voz", voice, Volume2)}
         {isOwner && (
           <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => setOpen(true)}>
-            <Plus className="size-4" /> Novo canal
+            <Plus className="size-4" /> Nova mesa
           </Button>
         )}
       </div>
 
       <div className="border-border bg-rail flex items-center gap-2 border-t px-3 py-2.5">
-        <Avatar className="size-8">
-          <AvatarFallback className="bg-primary text-primary-foreground text-xs">
-            {displayName.slice(0, 2).toUpperCase()}
-          </AvatarFallback>
-        </Avatar>
+        <Bottlecap name={displayName} className="size-9" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{displayName}</p>
           <p
             className={cn(
               "flex items-center gap-1 text-[11px]",
-              isAdult ? "text-primary" : "text-warning",
+              isAdult ? "text-primary" : "text-neon",
             )}
           >
             {isAdult ? <ShieldCheck className="size-3" /> : <ShieldAlert className="size-3" />}
@@ -138,17 +134,19 @@ export function ChannelSidebar({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Novo canal</DialogTitle>
-            <DialogDescription>Crie um canal de texto ou uma sala de voz e tela.</DialogDescription>
+            <DialogTitle className="font-display text-2xl tracking-wide">Nova mesa</DialogTitle>
+            <DialogDescription>
+              Pode ser uma mesa de texto pra resenha ou uma mesa de voz com tela compartilhada.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="channel-name">Nome</Label>
+              <Label htmlFor="channel-name">Nome da mesa</Label>
               <Input
                 id="channel-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="suporte"
+                placeholder="mesa-do-valorant"
               />
             </div>
             <div className="space-y-2">
@@ -158,15 +156,15 @@ export function ChannelSidebar({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="text">Canal de texto</SelectItem>
-                  <SelectItem value="voice">Sala de voz e tela</SelectItem>
+                  <SelectItem value="text">Mesa de texto</SelectItem>
+                  <SelectItem value="voice">Mesa de voz e tela</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
           <DialogFooter>
             <Button onClick={submit} disabled={saving || !name.trim()}>
-              {saving ? "Criando..." : "Criar canal"}
+              {saving ? "Botando a mesa..." : "Criar mesa"}
             </Button>
           </DialogFooter>
         </DialogContent>

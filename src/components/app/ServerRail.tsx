@@ -1,4 +1,4 @@
-import { Plus, LogIn, Home } from "lucide-react";
+import { Plus, LogIn, Beer } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -16,25 +16,26 @@ type Props = {
 export function ServerRail({ servers, activeId, onSelect, onCreate, onJoin }: Props) {
   return (
     <TooltipProvider delayDuration={200}>
-      <nav className="bg-rail flex h-full w-[68px] shrink-0 flex-col items-center gap-2 border-r border-border py-3">
+      <nav className="bg-rail border-border flex h-full w-[72px] shrink-0 flex-col items-center gap-2 border-r py-3">
         <Link
           to="/"
-          className="bg-gradient-neon mb-1 flex size-11 items-center justify-center rounded-2xl text-lg font-bold text-primary-foreground"
+          className="bg-gradient-amber text-primary-foreground glow-ring mb-1 flex size-11 items-center justify-center rounded-2xl"
+          title="Início"
         >
-          <Home className="size-5" />
+          <Beer className="size-5" />
         </Link>
         <div className="bg-border h-px w-8" />
 
-        <div className="scrollbar-thin flex w-full flex-1 flex-col items-center gap-2 overflow-y-auto">
+        <div className="scrollbar-thin flex w-full flex-1 flex-col items-center gap-2 overflow-y-auto py-1">
           {servers.map((s) => (
             <Tooltip key={s.id}>
               <TooltipTrigger asChild>
                 <button
                   onClick={() => onSelect(s.id)}
                   className={cn(
-                    "flex size-11 items-center justify-center rounded-2xl text-lg transition-all",
+                    "font-display flex size-11 items-center justify-center rounded-2xl text-xl tracking-wide transition-all",
                     activeId === s.id
-                      ? "bg-primary text-primary-foreground rounded-xl"
+                      ? "bg-primary text-primary-foreground glow-ring rounded-xl"
                       : "bg-surface text-foreground hover:bg-surface-2 hover:rounded-xl",
                   )}
                 >
@@ -56,7 +57,7 @@ export function ServerRail({ servers, activeId, onSelect, onCreate, onJoin }: Pr
               <Plus className="size-5" />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="right">Criar comunidade</TooltipContent>
+          <TooltipContent side="right">Abrir um buteco</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
