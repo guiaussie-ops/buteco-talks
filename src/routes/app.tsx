@@ -24,15 +24,15 @@ export const Route = createFileRoute("/app")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "Minhas comunidades — Praça" },
+      { title: "Meus butecos — Buteco" },
       {
         name: "description",
-        content: "Converse por texto, entre em salas de voz e compartilhe sua tela com seus amigos.",
+        content: "Converse por texto, entre nas mesas de voz e compartilhe sua tela com a turma.",
       },
-      { property: "og:title", content: "Minhas comunidades — Praça" },
+      { property: "og:title", content: "Meus butecos — Buteco" },
       {
         property: "og:description",
-        content: "Converse por texto, entre em salas de voz e compartilhe sua tela com seus amigos.",
+        content: "Converse por texto, entre nas mesas de voz e compartilhe sua tela com a turma.",
       },
       { name: "robots", content: "noindex" },
     ],
@@ -156,9 +156,9 @@ function AppPage() {
       setActiveChannel(null);
       setCreateOpen(false);
       setServerName("");
-      toast.success("Comunidade criada!");
+      toast.success("Buteco aberto! Chama a galera.");
     },
-    onError: () => toast.error("Não consegui criar a comunidade."),
+    onError: () => toast.error("Não consegui abrir o buteco."),
   });
 
   const joinServer = useMutation({
@@ -173,7 +173,7 @@ function AppPage() {
       setActiveChannel(null);
       setJoinOpen(false);
       setInviteInput("");
-      toast.success("Você entrou na comunidade!");
+      toast.success("Você puxou a cadeira! Bem-vindo ao buteco.");
     },
     onError: () => toast.error("Convite inválido."),
   });
@@ -181,7 +181,7 @@ function AppPage() {
   const createChannel = async (name: string, kind: "text" | "voice") => {
     const { error } = await supabase.from("channels").insert({ server_id: activeServerId!, name, kind });
     if (error) {
-      toast.error("Não consegui criar o canal.");
+      toast.error("Não consegui criar a mesa.");
       return;
     }
     await qc.invalidateQueries({ queryKey: ["channels", activeServerId] });
@@ -247,18 +247,18 @@ function AppPage() {
             )
           ) : (
             <div className="text-muted-foreground flex flex-1 items-center justify-center text-sm">
-              Selecione um canal
+              Escolha uma mesa
             </div>
           )}
         </>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
-          <h1 className="font-display text-2xl font-semibold">Você ainda não tem comunidades</h1>
+          <h1 className="font-display text-3xl tracking-wide">Você ainda não tem nenhum buteco</h1>
           <p className="text-muted-foreground max-w-sm text-sm">
-            Crie a sua comunidade e convide a galera, ou entre em uma usando um código de convite.
+            Abra o seu buteco e chame a galera, ou puxe uma cadeira usando o convite de um amigo.
           </p>
           <div className="flex gap-2">
-            <Button onClick={() => setCreateOpen(true)}>Criar comunidade</Button>
+            <Button onClick={() => setCreateOpen(true)}>Abrir um buteco</Button>
             <Button variant="outline" onClick={() => setJoinOpen(true)}>
               Usar convite
             </Button>
@@ -269,18 +269,18 @@ function AppPage() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Criar comunidade</DialogTitle>
+            <DialogTitle className="font-display text-2xl tracking-wide">Abrir um buteco</DialogTitle>
             <DialogDescription>
-              Ela já vem com um canal de texto e uma sala de voz com compartilhamento de tela.
+              Ele já vem com uma mesa de texto e uma mesa de voz com compartilhamento de tela.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="server-name">Nome da comunidade</Label>
+            <Label htmlFor="server-name">Nome do buteco</Label>
             <Input
               id="server-name"
               value={serverName}
               onChange={(e) => setServerName(e.target.value)}
-              placeholder="Turma do suporte"
+              placeholder="Buteco do Zé"
             />
           </div>
           <DialogFooter>
@@ -297,8 +297,8 @@ function AppPage() {
       <Dialog open={joinOpen} onOpenChange={setJoinOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Entrar com convite</DialogTitle>
-            <DialogDescription>Cole o código que seu amigo enviou.</DialogDescription>
+            <DialogTitle className="font-display text-2xl tracking-wide">Puxar uma cadeira</DialogTitle>
+            <DialogDescription>Cole o código que seu amigo mandou no grupo.</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
             <Label htmlFor="invite">Código de convite</Label>
