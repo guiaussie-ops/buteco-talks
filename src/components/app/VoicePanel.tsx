@@ -25,8 +25,8 @@ function VideoTile({
 }: {
   stream: MediaStream;
   label: string;
-  muted?: boolean;
-  main?: boolean;
+  muted?: boolean | undefined;
+  main?: boolean | undefined;
 }) {
   const ref = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
