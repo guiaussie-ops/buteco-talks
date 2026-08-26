@@ -38,6 +38,7 @@ type PeerBox = {
 export function useVoiceRoom(channelId: string | null, userId: string | null) {
   const [connected, setConnected] = useState(false);
   const [micOn, setMicOn] = useState(true);
+  const [micStream, setMicStreamState] = useState<MediaStream | null>(null);
   const [remotePeers, setRemotePeers] = useState<RemotePeer[]>([]);
   const [localVideoStream, setLocalVideoStream] = useState<MediaStream | null>(null);
   const [videoMode, setVideoMode] = useState<"none" | "camera" | "screen">("none");
@@ -147,8 +148,9 @@ export function useVoiceRoom(channelId: string | null, userId: string | null) {
         });
       } catch {
         setError("Não consegui acessar o microfone. Você entrou apenas como ouvinte.");
-        micStreamRef.current = null;
-      }
+          micStreamRef.current = null;
+        }
+      setMicStreamState(micStreamRef.current);
       if (cancelled) return;
 
       const chan = supabase.channel(`voice:${channelId}`, {
@@ -221,6 +223,7 @@ export function useVoiceRoom(channelId: string | null, userId: string | null) {
       setRemotePeers([]);
       micStreamRef.current?.getTracks().forEach((t) => t.stop());
       micStreamRef.current = null;
+      setMicStreamState(null);
       videoStreamRef.current?.getTracks().forEach((t) => t.stop());
       videoStreamRef.current = null;
       setLocalVideoStream(null);
@@ -291,6 +294,7 @@ export function useVoiceRoom(channelId: string | null, userId: string | null) {
   return {
     connected,
     micOn,
+    micStream,
     toggleMic,
     remotePeers,
     localVideoStream,
