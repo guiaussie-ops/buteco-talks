@@ -3,6 +3,8 @@ import { Mic, MicOff, MonitorUp, MonitorX, Video, VideoOff, PhoneOff, Volume2, S
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useVoiceRoom, type RemotePeer } from "@/hooks/useVoiceRoom";
+import { useSpeaking } from "@/hooks/useSpeaking";
+import { Bottlecap } from "@/components/Bottlecap";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -19,12 +21,12 @@ function VideoTile({
   stream,
   label,
   muted,
-  highlight,
+  main,
 }: {
   stream: MediaStream;
   label: string;
-  muted?: boolean;
-  highlight?: boolean;
+  muted?: boolean | undefined;
+  main?: boolean | undefined;
 }) {
   const ref = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
@@ -33,12 +35,18 @@ function VideoTile({
   return (
     <div
       className={cn(
-        "bg-rail border-border relative overflow-hidden rounded-xl border",
-        highlight && "border-primary/60 glow-ring",
+        "bg-rail relative overflow-hidden rounded-xl border",
+        main ? "border-primary/60 glow-ring" : "border-border",
       )}
     >
-      <video ref={ref} autoPlay playsInline muted={muted} className="aspect-video w-full bg-black object-contain" />
-      <span className="bg-background/80 absolute bottom-2 left-2 rounded-md px-2 py-0.5 text-xs font-medium">
+      <video
+        ref={ref}
+        autoPlay
+        playsInline
+        muted={muted}
+        className={cn("w-full bg-black object-contain", main ? "aspect-video" : "aspect-video")}
+      />
+      <span className="bg-background/85 absolute bottom-2 left-2 rounded-md px-2 py-0.5 text-xs font-medium">
         {label}
       </span>
     </div>
@@ -70,6 +78,12 @@ export function VoicePanel({ channelId, channelName, userId, isAdult, names, onL
   useEffect(() => {
     if (room.error) toast.error(room.error);
   }, [room.error]);
+
+  // Quem está falando: microfone local + áudio dos colegas.
+  const speaking = useSpeaking([
+    ...(room.micOn ? [{ id: userId, stream: room.micStream }] : []),
+    ...room.remotePeers.map((p) => ({ id: p.userId, stream: p.stream })),
+  ]);
 
   const setMediaFlags = async (camera: boolean, screen: boolean) => {
     const { error } = await supabase
@@ -103,14 +117,29 @@ export function VoicePanel({ channelId, channelName, userId, isAdult, names, onL
   };
 
   const videoPeers = room.remotePeers.filter((p) => p.hasVideo);
+  const tiles: { id: string; stream: MediaStream; label: string; muted?: boolean }[] = [];
+  if (room.localVideoStream) {
+    tiles.push({
+      id: "local",
+      stream: room.localVideoStream,
+      label: room.videoMode === "screen" ? "Sua tela" : "Sua câmera",
+      muted: true,
+    });
+  }
+  videoPeers.forEach((p) =>
+    tiles.push({ id: p.userId, stream: p.stream, label: names[p.userId] ?? "Participante" }),
+  );
+
+  const [spotlight, ...rest] = tiles;
+  const selfName = names[userId] ?? "Você";
 
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col">
       <header className="border-border flex h-14 shrink-0 items-center gap-2 border-b px-5">
         <Volume2 className="text-primary size-4" />
-        <h1 className="font-display text-sm font-semibold">{channelName}</h1>
+        <h1 className="font-display text-base tracking-wide">{channelName}</h1>
         <span className="text-muted-foreground ml-2 text-xs">
-          {room.connected ? `${room.participantCount} na sala` : "conectando..."}
+          {room.connected ? `${room.participantCount} na mesa` : "conectando..."}
         </span>
       </header>
 
@@ -125,36 +154,50 @@ export function VoicePanel({ channelId, channelName, userId, isAdult, names, onL
           </div>
         )}
 
-        {room.localVideoStream || videoPeers.length > 0 ? (
-          <div className="grid gap-4 md:grid-cols-2">
-            {room.localVideoStream && (
-              <VideoTile
-                stream={room.localVideoStream}
-                label={room.videoMode === "screen" ? "Sua tela" : "Sua câmera"}
-                muted
-                highlight
-              />
+        {spotlight ? (
+          <div className="space-y-3">
+            {/* tela em destaque — quem tá mostrando o gameplay */}
+            <VideoTile stream={spotlight.stream} label={spotlight.label} muted={spotlight.muted} main />
+            {rest.length > 0 && (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {rest.map((t) => (
+                  <VideoTile key={t.id} stream={t.stream} label={t.label} muted={t.muted} />
+                ))}
+              </div>
             )}
-            {videoPeers.map((p) => (
-              <VideoTile key={p.userId} stream={p.stream} label={names[p.userId] ?? "Participante"} />
-            ))}
           </div>
         ) : (
-          <div className="text-muted-foreground flex h-full min-h-60 flex-col items-center justify-center gap-2 text-center">
-            <MonitorUp className="size-8 opacity-40" />
-            <p className="text-sm">
-              Ninguém está transmitindo ainda.
-              {isAdult ? " Clique em Compartilhar tela para começar." : ""}
+          <div className="text-muted-foreground flex h-full min-h-60 flex-col items-center justify-center gap-3 text-center">
+            <MonitorUp className="text-primary size-9 opacity-50" />
+            <p className="max-w-xs text-sm">
+              Mesa de voz aberta. Chega mais, puxa a cadeira!
+              {isAdult ? " Quando quiser, mostre sua tela pra turma." : ""}
             </p>
           </div>
         )}
 
-        <div className="mt-6 flex flex-wrap gap-2">
-          {room.remotePeers.map((p) => (
-            <span key={p.userId} className="bg-surface rounded-full px-3 py-1 text-xs">
-              {names[p.userId] ?? "Participante"}
-            </span>
-          ))}
+        {/* tampinhas de quem está na mesa, com anel de neon quando fala */}
+        <div className="mt-8">
+          <p className="text-muted-foreground mb-2 text-[11px] font-semibold tracking-[0.16em] uppercase">
+            Na mesa agora
+          </p>
+          <div className="flex flex-wrap gap-4">
+            <div className="flex w-16 flex-col items-center gap-1.5">
+              <Bottlecap name={selfName} speaking={!!speaking[userId]} className="size-12" />
+              <span className="text-muted-foreground max-w-full truncate text-[11px]">
+                {selfName}
+              </span>
+            </div>
+            {room.remotePeers.map((p) => {
+              const name = names[p.userId] ?? "Participante";
+              return (
+                <div key={p.userId} className="flex w-16 flex-col items-center gap-1.5">
+                  <Bottlecap name={name} speaking={!!speaking[p.userId]} className="size-12" />
+                  <span className="text-muted-foreground max-w-full truncate text-[11px]">{name}</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -162,10 +205,10 @@ export function VoicePanel({ channelId, channelName, userId, isAdult, names, onL
         <AudioSink key={p.userId} peer={p} />
       ))}
 
-      <div className="border-border bg-surface flex shrink-0 flex-wrap items-center justify-center gap-2 border-t p-4">
+      <div className="border-border bg-surface wood-texture flex shrink-0 flex-wrap items-center justify-center gap-2 border-t p-4">
         <Button variant={room.micOn ? "secondary" : "destructive"} size="sm" onClick={room.toggleMic}>
           {room.micOn ? <Mic className="size-4" /> : <MicOff className="size-4" />}
-          {room.micOn ? "Microfone" : "Mudo"}
+          {room.micOn ? "Microfone" : "Desmutar"}
         </Button>
         <Button
           variant={room.videoMode === "screen" ? "default" : "secondary"}
@@ -174,7 +217,7 @@ export function VoicePanel({ channelId, channelName, userId, isAdult, names, onL
           onClick={() => void handleVideo("screen")}
         >
           {room.videoMode === "screen" ? <MonitorX className="size-4" /> : <MonitorUp className="size-4" />}
-          {room.videoMode === "screen" ? "Parar tela" : "Compartilhar tela"}
+          {room.videoMode === "screen" ? "Parar de mostrar" : "Mostrar tela"}
         </Button>
         <Button
           variant={room.videoMode === "camera" ? "default" : "secondary"}
@@ -186,7 +229,7 @@ export function VoicePanel({ channelId, channelName, userId, isAdult, names, onL
           Câmera
         </Button>
         <Button variant="destructive" size="sm" onClick={onLeave}>
-          <PhoneOff className="size-4" /> Sair da sala
+          <PhoneOff className="size-4" /> Sair da mesa
         </Button>
       </div>
     </section>
