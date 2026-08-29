@@ -7,6 +7,7 @@ export type Profile = {
   username: string;
   display_name: string;
   avatar_url: string | null;
+  bio: string | null;
   birth_date: string | null;
 };
 
@@ -41,7 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadProfile = useCallback(async (userId: string) => {
     const { data } = await supabase
       .from("profiles")
-      .select("id, username, display_name, avatar_url, birth_date")
+      .select("id, username, display_name, avatar_url, bio, birth_date")
       .eq("id", userId)
       .maybeSingle();
     setProfile((data as Profile) ?? null);

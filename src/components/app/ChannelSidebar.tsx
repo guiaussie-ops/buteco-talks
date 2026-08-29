@@ -62,6 +62,11 @@ type Props = {
   onRenameChannel: (channelId: string, name: string) => Promise<void>;
   onDeleteChannel: (channelId: string) => Promise<void>;
   onRegenerateInvite: () => Promise<void>;
+  onOpenAccount: () => void;
+  /** foto do usuario logado; sem ela fica a tampinha */
+  avatarUrl: string | null;
+  /** foto de cada membro do buteco, por id */
+  avatars: Record<string, string | null>;
 };
 
 export function ChannelSidebar({
@@ -83,6 +88,9 @@ export function ChannelSidebar({
   onRenameChannel,
   onDeleteChannel,
   onRegenerateInvite,
+  onOpenAccount,
+  avatarUrl,
+  avatars,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -205,6 +213,7 @@ export function ChannelSidebar({
                     <li key={userId} className="flex items-center gap-1.5">
                       <Bottlecap
                         name={name}
+                        src={avatars[userId]}
                         speaking={
                           voiceSession.active?.channelId === c.id && !!voiceSession.speaking[userId]
                         }
@@ -268,19 +277,25 @@ export function ChannelSidebar({
       <VoiceBar onOpenRoom={onOpenVoiceRoom} />
 
       <div className="border-border bg-rail flex items-center gap-2 border-t px-3 py-2.5">
-        <Bottlecap name={displayName} className="size-9" />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{displayName}</p>
-          <p
-            className={cn(
-              "flex items-center gap-1 text-[11px]",
-              isAdult ? "text-primary" : "text-neon",
-            )}
-          >
-            {isAdult ? <ShieldCheck className="size-3" /> : <ShieldAlert className="size-3" />}
-            {isAdult ? "Tela liberada" : "Modo protegido"}
-          </p>
-        </div>
+        <button
+          onClick={onOpenAccount}
+          title="Configurações da conta"
+          className="hover:bg-surface-2/60 -mx-1 flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-0.5 text-left transition-colors"
+        >
+          <Bottlecap name={displayName} src={avatarUrl} className="size-9" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium">{displayName}</span>
+            <span
+              className={cn(
+                "flex items-center gap-1 text-[11px]",
+                isAdult ? "text-primary" : "text-neon",
+              )}
+            >
+              {isAdult ? <ShieldCheck className="size-3" /> : <ShieldAlert className="size-3" />}
+              {isAdult ? "Tela liberada" : "Modo protegido"}
+            </span>
+          </span>
+        </button>
         <button
           onClick={onSignOut}
           className="text-muted-foreground hover:text-destructive"

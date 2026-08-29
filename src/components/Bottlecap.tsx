@@ -12,12 +12,19 @@ type Props = {
   className?: string;
   /** anel de neon pulsando (falando agora) */
   speaking?: boolean;
+  /**
+   * Foto do perfil; sem ela a tampinha gerada continua sendo o padrão.
+   * O `undefined` é explícito por causa do exactOptionalPropertyTypes: quem
+   * passa `avatars[id]` de um mapa incompleto manda undefined, não null.
+   */
+  src?: string | null | undefined;
 };
 
 /**
  * Avatar em formato de tampinha de cerveja: círculo serrilhado com a inicial.
+ * Quem subiu foto aparece com ela, recortada dentro do mesmo serrilhado.
  */
-export function Bottlecap({ name, className, speaking }: Props) {
+export function Bottlecap({ name, className, speaking, src }: Props) {
   const hue = hueFor(name || "?");
   const cap = `oklch(0.66 0.14 ${hue})`;
   const capDark = `oklch(0.46 0.12 ${hue})`;
@@ -35,15 +42,26 @@ export function Bottlecap({ name, className, speaking }: Props) {
       }}
       aria-hidden
     >
-      <span
-        className="absolute inset-[13%] rounded-full"
-        style={{
-          background: `radial-gradient(circle at 32% 26%, color-mix(in oklab, ${cap} 88%, white), ${capDark})`,
-        }}
-      />
-      <span className="text-background relative font-display text-[0.95em] leading-none tracking-wide">
-        {initial}
-      </span>
+      {src ? (
+        <img
+          src={src}
+          alt=""
+          className="absolute inset-[13%] rounded-full object-cover"
+          loading="lazy"
+        />
+      ) : (
+        <>
+          <span
+            className="absolute inset-[13%] rounded-full"
+            style={{
+              background: `radial-gradient(circle at 32% 26%, color-mix(in oklab, ${cap} 88%, white), ${capDark})`,
+            }}
+          />
+          <span className="text-background font-display relative text-[0.95em] leading-none tracking-wide">
+            {initial}
+          </span>
+        </>
+      )}
     </span>
   );
 }

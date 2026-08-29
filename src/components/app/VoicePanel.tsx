@@ -1,5 +1,15 @@
 import { useEffect, useRef } from "react";
-import { Mic, MicOff, MonitorUp, MonitorX, Video, VideoOff, PhoneOff, Volume2, ShieldAlert } from "lucide-react";
+import {
+  Mic,
+  MicOff,
+  MonitorUp,
+  MonitorX,
+  Video,
+  VideoOff,
+  PhoneOff,
+  Volume2,
+  ShieldAlert,
+} from "lucide-react";
 import { useVoice } from "@/lib/voice";
 import { Bottlecap } from "@/components/Bottlecap";
 import { Button } from "@/components/ui/button";
@@ -11,6 +21,7 @@ type Props = {
   userId: string;
   isAdult: boolean;
   names: Record<string, string>;
+  avatars: Record<string, string | null>;
   onLeave: () => void;
 };
 
@@ -54,7 +65,15 @@ function VideoTile({
  * Tela da mesa de voz. É só a *view* — a conexão vive no VoiceProvider,
  * então desmontar este componente (trocar de canal) não derruba a voz.
  */
-export function VoicePanel({ channelId, channelName, userId, isAdult, names, onLeave }: Props) {
+export function VoicePanel({
+  channelId,
+  channelName,
+  userId,
+  isAdult,
+  names,
+  avatars,
+  onLeave,
+}: Props) {
   const voice = useVoice();
   const viewingActiveRoom = voice.active?.channelId === channelId;
 
@@ -94,8 +113,8 @@ export function VoicePanel({ channelId, channelName, userId, isAdult, names, onL
           <div className="border-warning/40 bg-warning/10 text-warning mb-5 flex items-start gap-2 rounded-xl border p-3 text-sm">
             <ShieldAlert className="mt-0.5 size-4 shrink-0" />
             <p>
-              Sua conta está em <strong>modo protegido</strong>: você pode falar e ouvir, mas câmera e
-              compartilhamento de tela ficam desativados por ser menor de 18 anos.
+              Sua conta está em <strong>modo protegido</strong>: você pode falar e ouvir, mas câmera
+              e compartilhamento de tela ficam desativados por ser menor de 18 anos.
             </p>
           </div>
         )}
@@ -103,7 +122,12 @@ export function VoicePanel({ channelId, channelName, userId, isAdult, names, onL
         {viewingActiveRoom && spotlight ? (
           <div className="space-y-3">
             {/* tela em destaque — quem tá mostrando o gameplay */}
-            <VideoTile stream={spotlight.stream} label={spotlight.label} muted={spotlight.muted} main />
+            <VideoTile
+              stream={spotlight.stream}
+              label={spotlight.label}
+              muted={spotlight.muted}
+              main
+            />
             {rest.length > 0 && (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {rest.map((t) => (
@@ -130,7 +154,12 @@ export function VoicePanel({ channelId, channelName, userId, isAdult, names, onL
             </p>
             <div className="flex flex-wrap gap-4">
               <div className="flex w-16 flex-col items-center gap-1.5">
-                <Bottlecap name={selfName} speaking={!!voice.speaking[userId]} className="size-12" />
+                <Bottlecap
+                  name={selfName}
+                  src={avatars[userId]}
+                  speaking={!!voice.speaking[userId]}
+                  className="size-12"
+                />
                 <span className="text-muted-foreground max-w-full truncate text-[11px]">
                   {selfName}
                 </span>
@@ -139,8 +168,15 @@ export function VoicePanel({ channelId, channelName, userId, isAdult, names, onL
                 const name = names[p.userId] ?? "Participante";
                 return (
                   <div key={p.userId} className="flex w-16 flex-col items-center gap-1.5">
-                    <Bottlecap name={name} speaking={!!voice.speaking[p.userId]} className="size-12" />
-                    <span className="text-muted-foreground max-w-full truncate text-[11px]">{name}</span>
+                    <Bottlecap
+                      name={name}
+                      src={avatars[p.userId]}
+                      speaking={!!voice.speaking[p.userId]}
+                      className="size-12"
+                    />
+                    <span className="text-muted-foreground max-w-full truncate text-[11px]">
+                      {name}
+                    </span>
                   </div>
                 );
               })}
@@ -165,7 +201,11 @@ export function VoicePanel({ channelId, channelName, userId, isAdult, names, onL
           disabled={voice.busy || !isAdult || !viewingActiveRoom}
           onClick={() => void voice.toggleVideo("screen")}
         >
-          {voice.videoMode === "screen" ? <MonitorX className="size-4" /> : <MonitorUp className="size-4" />}
+          {voice.videoMode === "screen" ? (
+            <MonitorX className="size-4" />
+          ) : (
+            <MonitorUp className="size-4" />
+          )}
           {voice.videoMode === "screen" ? "Parar de mostrar" : "Mostrar tela"}
         </Button>
         <Button
@@ -174,7 +214,11 @@ export function VoicePanel({ channelId, channelName, userId, isAdult, names, onL
           disabled={voice.busy || !isAdult || !viewingActiveRoom}
           onClick={() => void voice.toggleVideo("camera")}
         >
-          {voice.videoMode === "camera" ? <VideoOff className="size-4" /> : <Video className="size-4" />}
+          {voice.videoMode === "camera" ? (
+            <VideoOff className="size-4" />
+          ) : (
+            <Video className="size-4" />
+          )}
           Câmera
         </Button>
         <Button variant="destructive" size="sm" disabled={!viewingActiveRoom} onClick={onLeave}>

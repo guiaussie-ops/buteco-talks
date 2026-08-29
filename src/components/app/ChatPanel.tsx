@@ -19,6 +19,7 @@ type Props = {
   channelName: string;
   userId: string;
   names: Record<string, string>;
+  avatars: Record<string, string | null>;
 };
 
 function formatTime(iso: string) {
@@ -29,9 +30,7 @@ function formatDay(iso: string) {
   const d = new Date(iso);
   const today = new Date();
   const sameDay = d.toDateString() === today.toDateString();
-  return sameDay
-    ? "hoje"
-    : d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  return sameDay ? "hoje" : d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
 
 /** Agrupa mensagens seguidas da mesma pessoa (janela de 5 min). */
@@ -40,7 +39,7 @@ function isGrouped(prev: Message | undefined, msg: Message) {
   return new Date(msg.created_at).getTime() - new Date(prev.created_at).getTime() < 5 * 60 * 1000;
 }
 
-export function ChatPanel({ channelId, channelName, userId, names }: Props) {
+export function ChatPanel({ channelId, channelName, userId, names, avatars }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -62,7 +61,12 @@ export function ChatPanel({ channelId, channelName, userId, names }: Props) {
       .channel(`messages:${channelId}`)
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages", filter: `channel_id=eq.${channelId}` },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+          filter: `channel_id=eq.${channelId}`,
+        },
         (payload) => {
           const msg = payload.new as Message;
           setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
@@ -70,7 +74,12 @@ export function ChatPanel({ channelId, channelName, userId, names }: Props) {
       )
       .on(
         "postgres_changes",
-        { event: "DELETE", schema: "public", table: "messages", filter: `channel_id=eq.${channelId}` },
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "messages",
+          filter: `channel_id=eq.${channelId}`,
+        },
         (payload) => {
           const old = payload.old as { id: string };
           setMessages((prev) => prev.filter((m) => m.id !== old.id));
@@ -92,7 +101,9 @@ export function ChatPanel({ channelId, channelName, userId, names }: Props) {
     const content = draft.trim();
     if (!content) return;
     setSending(true);
-    const { error } = await supabase.from("messages").insert({ channel_id: channelId, user_id: userId, content });
+    const { error } = await supabase
+      .from("messages")
+      .insert({ channel_id: channelId, user_id: userId, content });
     setSending(false);
     if (error) {
       toast.error("Não rolou mandar a resenha. Tenta de novo.");
@@ -124,7 +135,10 @@ export function ChatPanel({ channelId, channelName, userId, names }: Props) {
             const grouped = isGrouped(messages[i - 1], m);
             if (grouped) {
               return (
-                <div key={m.id} className="hover:bg-surface/50 group rounded-md py-0.5 pr-2 pl-[52px]">
+                <div
+                  key={m.id}
+                  className="hover:bg-surface/50 group rounded-md py-0.5 pr-2 pl-[52px]"
+                >
                   <span className="text-muted-foreground mr-2 hidden w-8 text-right text-[10px] group-hover:inline-block">
                     {formatTime(m.created_at)}
                   </span>
@@ -136,7 +150,7 @@ export function ChatPanel({ channelId, channelName, userId, names }: Props) {
             }
             return (
               <div key={m.id} className="mt-4 flex gap-3">
-                <Bottlecap name={name} className="mt-0.5" />
+                <Bottlecap name={name} src={avatars[m.user_id]} className="mt-0.5" />
                 <div className="min-w-0">
                   <p className="flex items-baseline gap-2">
                     <span className="text-sm font-semibold">{name}</span>
@@ -144,7 +158,9 @@ export function ChatPanel({ channelId, channelName, userId, names }: Props) {
                       {formatDay(m.created_at)} às {formatTime(m.created_at)}
                     </span>
                   </p>
-                  <p className="text-foreground/90 text-sm break-words whitespace-pre-wrap">{m.content}</p>
+                  <p className="text-foreground/90 text-sm break-words whitespace-pre-wrap">
+                    {m.content}
+                  </p>
                 </div>
               </div>
             );

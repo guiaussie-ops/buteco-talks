@@ -10,6 +10,8 @@ import { ChannelSidebar, type Channel } from "@/components/app/ChannelSidebar";
 import { ChatPanel } from "@/components/app/ChatPanel";
 import { VoicePanel } from "@/components/app/VoicePanel";
 import { ServerSettingsDialog } from "@/components/app/ServerSettingsDialog";
+import { AccountSettingsDialog } from "@/components/app/AccountSettingsDialog";
+import { Bottlecap } from "@/components/Bottlecap";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -56,6 +58,7 @@ function AppPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const [serverName, setServerName] = useState("");
   const [inviteInput, setInviteInput] = useState("");
 
@@ -113,27 +116,33 @@ function AppPage() {
   const membersQuery = useQuery({
     queryKey: ["members", activeServerId],
     enabled: !!activeServerId,
-    queryFn: async (): Promise<Record<string, string>> => {
+    queryFn: async (): Promise<{
+      names: Record<string, string>;
+      avatars: Record<string, string | null>;
+    }> => {
       const { data: members, error } = await supabase
         .from("server_members")
         .select("user_id")
         .eq("server_id", activeServerId!);
       if (error) throw error;
       const ids = (members ?? []).map((m) => m.user_id);
-      if (ids.length === 0) return {};
+      if (ids.length === 0) return { names: {}, avatars: {} };
       const { data: profiles } = await supabase
         .from("profiles")
-        .select("id, display_name, username")
+        .select("id, display_name, username, avatar_url")
         .in("id", ids);
-      const map: Record<string, string> = {};
+      const names: Record<string, string> = {};
+      const avatars: Record<string, string | null> = {};
       (profiles ?? []).forEach((p) => {
-        map[p.id] = p.display_name || p.username;
+        names[p.id] = p.display_name || p.username;
+        avatars[p.id] = p.avatar_url;
       });
-      return map;
+      return { names, avatars };
     },
   });
 
-  const names = membersQuery.data ?? {};
+  const names = membersQuery.data?.names ?? {};
+  const avatars = membersQuery.data?.avatars ?? {};
 
   const createServer = useMutation({
     mutationFn: async (name: string) => {
@@ -314,6 +323,9 @@ function AppPage() {
             onRenameChannel={renameChannel}
             onDeleteChannel={deleteChannel}
             onRegenerateInvite={regenerateInvite}
+            onOpenAccount={() => setAccountOpen(true)}
+            avatarUrl={profile.avatar_url}
+            avatars={avatars}
             onCreateChannel={createChannel}
             displayName={profile.display_name || profile.username}
             isAdult={isAdult}
@@ -334,6 +346,7 @@ function AppPage() {
                 userId={uid!}
                 isAdult={isAdult}
                 names={names}
+                avatars={avatars}
                 onLeave={() => {
                   voice.leave();
                   const text = channels.find((c) => c.kind === "text");
@@ -347,6 +360,7 @@ function AppPage() {
                 channelName={activeChannel.name}
                 userId={uid!}
                 names={names}
+                avatars={avatars}
               />
             )
           ) : (
@@ -367,6 +381,24 @@ function AppPage() {
               Usar convite
             </Button>
           </div>
+
+          {/*
+            Sem buteco não há barra lateral, e é lá que mora o acesso ao perfil.
+            Sem este atalho, quem acabou de criar a conta não consegue nem trocar
+            o apelido antes de entrar no primeiro buteco.
+          */}
+          <button
+            onClick={() => setAccountOpen(true)}
+            title="Configurações da conta"
+            className="border-border bg-surface/60 hover:border-primary/60 hover:bg-surface mt-6 flex items-center gap-2.5 rounded-full border py-1.5 pr-4 pl-1.5 transition-colors"
+          >
+            <Bottlecap
+              name={profile.display_name || profile.username}
+              src={profile.avatar_url}
+              className="size-7 text-xs"
+            />
+            <span className="text-sm">Ajeitar meu perfil</span>
+          </button>
         </div>
       )}
 
@@ -381,6 +413,8 @@ function AppPage() {
           onDelete={deleteServer}
         />
       )}
+
+      <AccountSettingsDialog open={accountOpen} onOpenChange={setAccountOpen} />
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent>
