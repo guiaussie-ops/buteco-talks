@@ -217,6 +217,7 @@ export function useVoiceRoom(channelId: string | null, userId: string | null) {
     return () => {
       cancelled = true;
       setConnected(false);
+      setMicOn(true);
       peersRef.current.forEach((b) => b.pc.close());
       peersRef.current.clear();
       remoteStreamsRef.current.clear();
