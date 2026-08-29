@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { Hash, Volume2, Plus, Copy, LogOut, ShieldCheck, ShieldAlert } from "lucide-react";
-import { toast } from "sonner";
+import { Hash, Volume2, Plus, UserPlus, LogOut, ShieldCheck, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Bottlecap } from "@/components/Bottlecap";
+import { InviteDialog } from "@/components/app/InviteDialog";
 import { VoiceBar } from "@/components/app/VoiceBar";
 import { useVoice } from "@/lib/voice";
 import { useVoiceRoster } from "@/hooks/useVoiceRoster";
@@ -61,6 +61,7 @@ type Props = {
   onOpenSettings: () => void;
   onRenameChannel: (channelId: string, name: string) => Promise<void>;
   onDeleteChannel: (channelId: string) => Promise<void>;
+  onRegenerateInvite: () => Promise<void>;
 };
 
 export function ChannelSidebar({
@@ -81,8 +82,10 @@ export function ChannelSidebar({
   onOpenSettings,
   onRenameChannel,
   onDeleteChannel,
+  onRegenerateInvite,
 }: Props) {
   const [open, setOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [name, setName] = useState("");
   const [kind, setKind] = useState<"text" | "voice">("text");
   const [saving, setSaving] = useState(false);
@@ -232,25 +235,31 @@ export function ChannelSidebar({
             <Settings className="size-4" />
           </button>
         )}
-        {inviteCode && (
-          <button
-            onClick={() => {
-              void navigator.clipboard.writeText(inviteCode);
-              toast.success("Convite copiado: " + inviteCode);
-            }}
-            className="text-muted-foreground hover:text-primary shrink-0"
-            title="Copiar convite"
-          >
-            <Copy className="size-4" />
-          </button>
-        )}
       </div>
+
+      {canManage && inviteCode && (
+        <div className="border-border border-b p-2">
+          <Button
+            size="sm"
+            className="w-full justify-center"
+            onClick={() => setInviteOpen(true)}
+            title="Copiar o link do convite"
+          >
+            <UserPlus className="size-4" /> Convidar a galera
+          </Button>
+        </div>
+      )}
 
       <div className="scrollbar-thin flex-1 overflow-y-auto p-2">
         {renderGroup("Mesas de texto", text, Hash)}
         {renderGroup("Mesas de voz", voice, Volume2)}
         {canManage && (
-          <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => setOpen(true)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start"
+            onClick={() => setOpen(true)}
+          >
             <Plus className="size-4" /> Nova mesa
           </Button>
         )}
@@ -272,7 +281,11 @@ export function ChannelSidebar({
             {isAdult ? "Tela liberada" : "Modo protegido"}
           </p>
         </div>
-        <button onClick={onSignOut} className="text-muted-foreground hover:text-destructive" title="Sair">
+        <button
+          onClick={onSignOut}
+          className="text-muted-foreground hover:text-destructive"
+          title="Sair"
+        >
           <LogOut className="size-4" />
         </button>
       </div>
@@ -405,6 +418,17 @@ export function ChannelSidebar({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {inviteCode && (
+        <InviteDialog
+          open={inviteOpen}
+          onOpenChange={setInviteOpen}
+          serverName={serverName}
+          inviteCode={inviteCode}
+          canManage={canManage}
+          onRegenerate={onRegenerateInvite}
+        />
+      )}
     </aside>
   );
 }

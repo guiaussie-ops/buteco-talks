@@ -10,6 +10,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ShieldCheck } from "lucide-react";
 
 export const Route = createFileRoute("/entrar")({
+  // O retorno precisa ter `redirect` opcional: se ele virar obrigatório, todo
+  // <Link to="/entrar"> do app passa a exigir search.
+  validateSearch: (search: Record<string, unknown>): { redirect?: string } => {
+    const value = search["redirect"];
+    return typeof value === "string" ? { redirect: value } : {};
+  },
   head: () => ({
     meta: [
       { title: "Puxar uma cadeira — Buteco" },
@@ -30,12 +36,28 @@ export const Route = createFileRoute("/entrar")({
 function AuthPage() {
   const navigate = useNavigate();
   const { session } = useAuth();
+  const { redirect } = Route.useSearch();
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState("login");
 
+  /**
+   * Volta pra onde a pessoa estava antes do login. Só reconhecemos a rota de
+   * convite: aceitar uma URL qualquer aqui viraria um open redirect.
+   */
+  const goNext = () => {
+    const code = redirect?.match(/^\/convite\/([A-Za-z0-9]+)$/)?.[1];
+    if (code) {
+      void navigate({ to: "/convite/$code", params: { code } });
+      return;
+    }
+    void navigate({ to: "/app" });
+  };
+
   useEffect(() => {
-    if (session) void navigate({ to: "/app" });
-  }, [session, navigate]);
+    if (session) goNext();
+    // goNext depende de redirect/navigate, ambos estáveis dentro da tela.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, navigate, redirect]);
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -64,7 +86,7 @@ function AuthPage() {
       );
       return;
     }
-    void navigate({ to: "/app" });
+    goNext();
   };
 
   const handleSignup = async (e: React.FormEvent) => {
@@ -105,9 +127,8 @@ function AuthPage() {
       return;
     }
     toast.success("Conta criada! Bem-vindo ao Buteco.");
-    void navigate({ to: "/app" });
+    goNext();
   };
-
 
   return (
     <main className="bar-vignette relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-10">

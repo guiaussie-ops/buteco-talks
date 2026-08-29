@@ -168,24 +168,35 @@ function AppPage() {
   });
 
   const joinServer = useMutation({
+    // A RPC aceita o link inteiro colado e normaliza sozinha; não mexemos no texto aqui.
     mutationFn: async (code: string) => {
-      const { data, error } = await supabase.rpc("join_server_by_code", { _code: code.trim().toLowerCase() });
+      const { data, error } = await supabase.rpc("join_server_by_code", { _code: code });
       if (error) throw error;
-      return data as string;
+      return data as { status: "joined" | "already_member" | "not_found"; server_id?: string };
     },
-    onSuccess: async (id) => {
+    onSuccess: async (result) => {
+      if (result.status === "not_found") {
+        toast.error("Esse convite não existe ou já foi trocado. Peça um link novo.");
+        return;
+      }
       await qc.invalidateQueries({ queryKey: ["servers", uid] });
-      setActiveServerId(id);
+      if (result.server_id) setActiveServerId(result.server_id);
       setActiveChannel(null);
       setJoinOpen(false);
       setInviteInput("");
-      toast.success("Você puxou a cadeira! Bem-vindo ao buteco.");
+      toast[result.status === "joined" ? "success" : "info"](
+        result.status === "joined"
+          ? "Você puxou a cadeira! Bem-vindo ao buteco."
+          : "Você já está nesse buteco.",
+      );
     },
-    onError: () => toast.error("Convite inválido."),
+    onError: () => toast.error("Não consegui abrir esse convite. Tenta de novo."),
   });
 
   const createChannel = async (name: string, kind: "text" | "voice") => {
-    const { error } = await supabase.from("channels").insert({ server_id: activeServerId!, name, kind });
+    const { error } = await supabase
+      .from("channels")
+      .insert({ server_id: activeServerId!, name, kind });
     if (error) {
       toast.error("Não consegui criar a mesa.");
       return;
@@ -223,6 +234,19 @@ function AppPage() {
     setActiveChannel(null);
     await qc.invalidateQueries({ queryKey: ["servers", uid] });
     toast.success("Buteco fechado.");
+  };
+
+  const regenerateInvite = async () => {
+    if (!activeServer) return;
+    const { data, error } = await supabase.rpc("regenerate_invite_code", {
+      _server_id: activeServer.id,
+    });
+    if (error) {
+      toast.error("Não consegui gerar um convite novo.");
+      return;
+    }
+    await qc.invalidateQueries({ queryKey: ["servers", uid] });
+    toast.success("Convite novo na área: " + data);
   };
 
   const renameChannel = async (channelId: string, name: string) => {
@@ -289,6 +313,7 @@ function AppPage() {
             onOpenSettings={() => setSettingsOpen(true)}
             onRenameChannel={renameChannel}
             onDeleteChannel={deleteChannel}
+            onRegenerateInvite={regenerateInvite}
             onCreateChannel={createChannel}
             displayName={profile.display_name || profile.username}
             isAdult={isAdult}
@@ -360,7 +385,9 @@ function AppPage() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle className="font-display text-2xl tracking-wide">Abrir um buteco</DialogTitle>
+            <DialogTitle className="font-display text-2xl tracking-wide">
+              Abrir um buteco
+            </DialogTitle>
             <DialogDescription>
               Ele já vem com uma mesa de texto e uma mesa de voz com compartilhamento de tela.
             </DialogDescription>
@@ -388,15 +415,22 @@ function AppPage() {
       <Dialog open={joinOpen} onOpenChange={setJoinOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle className="font-display text-2xl tracking-wide">Puxar uma cadeira</DialogTitle>
-            <DialogDescription>Cole o código que seu amigo mandou no grupo.</DialogDescription>
+            <DialogTitle className="font-display text-2xl tracking-wide">
+              Puxar uma cadeira
+            </DialogTitle>
+            <DialogDescription>
+              Cole o código ou o link que seu amigo mandou no grupo.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="invite">Código de convite</Label>
+            <Label htmlFor="invite">Código ou link de convite</Label>
             <Input
               id="invite"
               value={inviteInput}
               onChange={(e) => setInviteInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && inviteInput.trim()) joinServer.mutate(inviteInput);
+              }}
               placeholder="a1b2c3d4e5"
             />
           </div>
