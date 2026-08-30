@@ -95,7 +95,16 @@ export function useMediaPrefs() {
 
 /** Constraint de áudio da captura, já com o dispositivo escolhido. */
 export function audioConstraints(prefs: MediaPrefs): MediaTrackConstraints {
-  const base: MediaTrackConstraints = { echoCancellation: true, noiseSuppression: true };
+  // Estes três são o processamento que o navegador faz no próprio pipeline de
+  // captura — o mesmo que o Discord usa. O ganho automático é o que levanta voz
+  // fraca; sem ele o microfone chega baixo na mesa.
+  const base: MediaTrackConstraints = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+    // Voz é mono. Pedir um canal evita upmix e corta banda pela metade.
+    channelCount: 1,
+  };
   // "ideal" e não "exact": se o fone escolhido não estiver mais plugado, o
   // navegador cai no padrão em vez de derrubar a entrada na mesa inteira.
   if (prefs.micId) base.deviceId = { ideal: prefs.micId };

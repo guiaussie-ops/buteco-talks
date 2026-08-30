@@ -34,6 +34,7 @@ type PeerBox = {
   polite: boolean;
   makingOffer: boolean;
   ignoreOffer: boolean;
+  audioSender: RTCRtpSender | null;
   videoSender: RTCRtpSender | null;
 };
 
@@ -58,10 +59,17 @@ export function useVoiceRoom(
   const peersRef = useRef<Map<string, PeerBox>>(new Map());
   const micStreamRef = useRef<MediaStream | null>(null);
   const videoStreamRef = useRef<MediaStream | null>(null);
-  /** faixa crua do microfone, antes do ganho; guardada para poder desmontar o grafo */
+  /**
+   * Faixa crua do microfone. É ela que vai ao ar no caminho padrão: o navegador
+   * só aplica cancelamento de eco e ganho automático na faixa que ele mesmo
+   * capturou. Reencaminhar por Web Audio produz uma faixa sintética que perde
+   * esse processamento — daí o áudio baixo e o eco.
+   */
   const micRawRef = useRef<MediaStream | null>(null);
   const gainCtxRef = useRef<AudioContext | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
+  /** Espelho de micOn, para reaplicar o mudo quando a faixa publicada troca. */
+  const micOnRef = useRef(true);
 
   // As prefs entram por ref: mudar o volume não pode reconectar a mesa inteira.
   const prefsRef = useRef(prefs);
@@ -82,6 +90,82 @@ export function useVoiceRoom(
     void chanRef.current?.send({ type: "broadcast", event: "signal", payload });
   }, []);
 
+  /** Reaplica o botão de mudo na faixa que acabou de entrar no ar. */
+  const aplicarMudo = useCallback((stream: MediaStream | null) => {
+    stream?.getAudioTracks().forEach((t) => (t.enabled = micOnRef.current));
+  }, []);
+
+  /**
+   * Troca a faixa de áudio publicada em todos os peers. replaceTrack não dispara
+   * renegociação, então ligar ou desligar o ganho não derruba ninguém da mesa.
+   */
+  const publicarFaixaDeAudio = useCallback(
+    (stream: MediaStream | null) => {
+      const track = stream?.getAudioTracks()[0] ?? null;
+      micStreamRef.current = stream;
+      aplicarMudo(stream);
+      setMicStreamState(stream);
+      peersRef.current.forEach((box) => {
+        void box.audioSender?.replaceTrack(track).catch(() => undefined);
+      });
+    },
+    [aplicarMudo],
+  );
+
+  /**
+   * Só é montado quando a pessoa mexe no volume de entrada. Enquanto o slider
+   * está em 100% a mesa recebe a faixa crua, sem nenhum processamento nosso.
+   */
+  const montarGrafoDeGanho = useCallback(
+    (ganho: number) => {
+      const cru = micRawRef.current;
+      if (!cru) return;
+      if (gainNodeRef.current) {
+        gainNodeRef.current.gain.value = ganho;
+        return;
+      }
+      try {
+        const AudioCtx =
+          window.AudioContext ??
+          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const source = ctx.createMediaStreamSource(cru);
+        const gain = ctx.createGain();
+        gain.gain.value = ganho;
+        const destino = ctx.createMediaStreamDestination();
+        source.connect(gain);
+        gain.connect(destino);
+
+        // Fora de um gesto do usuário o contexto nasce suspenso, e contexto
+        // suspenso não gera amostras: silêncio total para a mesa. No iOS ele
+        // também é suspenso ao bloquear a tela e não volta sozinho.
+        void ctx.resume().catch(() => undefined);
+        ctx.onstatechange = () => {
+          if (ctx.state === "suspended") void ctx.resume().catch(() => undefined);
+        };
+
+        gainCtxRef.current = ctx;
+        gainNodeRef.current = gain;
+        publicarFaixaDeAudio(destino.stream);
+      } catch {
+        // Sem Web Audio a mesa continua na faixa crua; só o slider fica sem efeito.
+        gainCtxRef.current = null;
+        gainNodeRef.current = null;
+      }
+    },
+    [publicarFaixaDeAudio],
+  );
+
+  /** Volta a publicar a faixa crua e derruba o grafo. */
+  const desmontarGrafoDeGanho = useCallback(() => {
+    if (!gainCtxRef.current && !gainNodeRef.current) return;
+    void gainCtxRef.current?.close().catch(() => undefined);
+    gainCtxRef.current = null;
+    gainNodeRef.current = null;
+    publicarFaixaDeAudio(micRawRef.current);
+  }, [publicarFaixaDeAudio]);
+
   const createPeer = useCallback(
     (remoteId: string, polite: boolean) => {
       const existing = peersRef.current.get(remoteId);
@@ -93,11 +177,15 @@ export function useVoiceRoom(
         polite,
         makingOffer: false,
         ignoreOffer: false,
+        audioSender: null,
         videoSender: null,
       };
       peersRef.current.set(remoteId, box);
 
-      micStreamRef.current?.getTracks().forEach((t) => pc.addTrack(t, micStreamRef.current!));
+      const aTrack = micStreamRef.current?.getAudioTracks()[0];
+      if (aTrack && micStreamRef.current) {
+        box.audioSender = pc.addTrack(aTrack, micStreamRef.current);
+      }
       const vTrack = videoStreamRef.current?.getVideoTracks()[0];
       if (vTrack && videoStreamRef.current) {
         box.videoSender = pc.addTrack(vTrack, videoStreamRef.current);
@@ -173,31 +261,12 @@ export function useVoiceRoom(
           audio: audioConstraints(prefsRef.current),
         });
         micRawRef.current = cru;
+        micStreamRef.current = cru;
+        aplicarMudo(cru);
 
-        // O volume de entrada não existe como constraint de captura: o jeito de
-        // ter esse controle é passar o áudio por um GainNode e mandar aos peers
-        // a faixa que sai do grafo, não a do microfone.
-        try {
-          const AudioCtx =
-            window.AudioContext ??
-            (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-          if (!AudioCtx) throw new Error("sem AudioContext");
-          const ctx = new AudioCtx();
-          const source = ctx.createMediaStreamSource(cru);
-          const gain = ctx.createGain();
-          gain.gain.value = prefsRef.current.inputGain;
-          const destino = ctx.createMediaStreamDestination();
-          source.connect(gain);
-          gain.connect(destino);
-          gainCtxRef.current = ctx;
-          gainNodeRef.current = gain;
-          micStreamRef.current = destino.stream;
-        } catch {
-          // Sem Web Audio a mesa continua funcionando; só o ganho fica sem efeito.
-          gainCtxRef.current = null;
-          gainNodeRef.current = null;
-          micStreamRef.current = cru;
-        }
+        // O grafo de ganho é opcional e só entra se a pessoa tiver mexido no
+        // slider. Em 100% a mesa recebe exatamente a faixa do navegador.
+        if (prefsRef.current.inputGain !== 1) montarGrafoDeGanho(prefsRef.current.inputGain);
       } catch {
         setError("Não consegui acessar o microfone. Você entrou apenas como ouvinte.");
         micRawRef.current = null;
@@ -272,16 +341,19 @@ export function useVoiceRoom(
       cancelled = true;
       setConnected(false);
       setMicOn(true);
+      micOnRef.current = true;
       peersRef.current.forEach((b) => b.pc.close());
       peersRef.current.clear();
       remoteStreamsRef.current.clear();
       setRemotePeers([]);
+      // Com o grafo montado a faixa publicada é outra que não a crua; parar só
+      // uma das duas deixaria o microfone aberto. Parar as duas é seguro porque
+      // stop() numa faixa já parada não faz nada.
       micStreamRef.current?.getTracks().forEach((t) => t.stop());
       micStreamRef.current = null;
-      // A faixa crua é outra: parar só a processada deixaria o microfone aberto.
       micRawRef.current?.getTracks().forEach((t) => t.stop());
       micRawRef.current = null;
-      void gainCtxRef.current?.close();
+      void gainCtxRef.current?.close().catch(() => undefined);
       gainCtxRef.current = null;
       gainNodeRef.current = null;
       setMicStreamState(null);
@@ -292,18 +364,21 @@ export function useVoiceRoom(
       if (chanRef.current) void supabase.removeChannel(chanRef.current);
       chanRef.current = null;
     };
-  }, [channelId, userId, createPeer, dropPeer, send]);
+  }, [channelId, userId, createPeer, dropPeer, send, aplicarMudo, montarGrafoDeGanho]);
 
   // ---- controls -----------------------------------------------------------
-  // Mexer no slider vale na hora, sem sair e voltar para a mesa.
+  // Mexer no slider vale na hora, sem sair e voltar para a mesa. Voltar a 100%
+  // desmonta o grafo e devolve a faixa crua — é o caminho que soa melhor.
   useEffect(() => {
-    if (gainNodeRef.current) gainNodeRef.current.gain.value = prefs.inputGain;
-  }, [prefs.inputGain]);
+    if (!micRawRef.current) return;
+    if (prefs.inputGain === 1) desmontarGrafoDeGanho();
+    else montarGrafoDeGanho(prefs.inputGain);
+  }, [prefs.inputGain, montarGrafoDeGanho, desmontarGrafoDeGanho]);
 
   const toggleMic = useCallback(() => {
-    const tracks = micStreamRef.current?.getAudioTracks() ?? [];
     const next = !micOn;
-    tracks.forEach((t) => (t.enabled = next));
+    micOnRef.current = next;
+    micStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = next));
     setMicOn(next);
   }, [micOn]);
 
