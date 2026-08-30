@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  audioConstraints,
+  videoConstraints,
+  MEDIA_PREFS_PADRAO,
+  type MediaPrefs,
+} from "@/lib/mediaPrefs";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 export type RemotePeer = {
@@ -35,7 +41,11 @@ type PeerBox = {
  * WebRTC mesh room. Signaling rides on a Realtime broadcast channel.
  * Presence tells us who is in the room.
  */
-export function useVoiceRoom(channelId: string | null, userId: string | null) {
+export function useVoiceRoom(
+  channelId: string | null,
+  userId: string | null,
+  prefs: MediaPrefs = MEDIA_PREFS_PADRAO,
+) {
   const [connected, setConnected] = useState(false);
   const [micOn, setMicOn] = useState(true);
   const [micStream, setMicStreamState] = useState<MediaStream | null>(null);
@@ -48,6 +58,14 @@ export function useVoiceRoom(channelId: string | null, userId: string | null) {
   const peersRef = useRef<Map<string, PeerBox>>(new Map());
   const micStreamRef = useRef<MediaStream | null>(null);
   const videoStreamRef = useRef<MediaStream | null>(null);
+  /** faixa crua do microfone, antes do ganho; guardada para poder desmontar o grafo */
+  const micRawRef = useRef<MediaStream | null>(null);
+  const gainCtxRef = useRef<AudioContext | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+
+  // As prefs entram por ref: mudar o volume não pode reconectar a mesa inteira.
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
   const remoteStreamsRef = useRef<Map<string, MediaStream>>(new Map());
 
   const publish = useCallback(() => {
@@ -70,7 +88,13 @@ export function useVoiceRoom(channelId: string | null, userId: string | null) {
       if (existing) return existing;
 
       const pc = new RTCPeerConnection(ICE_SERVERS);
-      const box: PeerBox = { pc, polite, makingOffer: false, ignoreOffer: false, videoSender: null };
+      const box: PeerBox = {
+        pc,
+        polite,
+        makingOffer: false,
+        ignoreOffer: false,
+        videoSender: null,
+      };
       peersRef.current.set(remoteId, box);
 
       micStreamRef.current?.getTracks().forEach((t) => pc.addTrack(t, micStreamRef.current!));
@@ -80,7 +104,8 @@ export function useVoiceRoom(channelId: string | null, userId: string | null) {
       }
 
       pc.onicecandidate = (e) => {
-        if (e.candidate && userId) send({ from: userId, to: remoteId, candidate: e.candidate.toJSON() });
+        if (e.candidate && userId)
+          send({ from: userId, to: remoteId, candidate: e.candidate.toJSON() });
       };
 
       pc.onnegotiationneeded = async () => {
@@ -88,7 +113,8 @@ export function useVoiceRoom(channelId: string | null, userId: string | null) {
         try {
           box.makingOffer = true;
           await pc.setLocalDescription();
-          if (pc.localDescription) send({ from: userId, to: remoteId, description: pc.localDescription.toJSON() });
+          if (pc.localDescription)
+            send({ from: userId, to: remoteId, description: pc.localDescription.toJSON() });
         } catch {
           /* ignore */
         } finally {
@@ -143,13 +169,40 @@ export function useVoiceRoom(channelId: string | null, userId: string | null) {
 
     const start = async () => {
       try {
-        micStreamRef.current = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true },
+        const cru = await navigator.mediaDevices.getUserMedia({
+          audio: audioConstraints(prefsRef.current),
         });
+        micRawRef.current = cru;
+
+        // O volume de entrada não existe como constraint de captura: o jeito de
+        // ter esse controle é passar o áudio por um GainNode e mandar aos peers
+        // a faixa que sai do grafo, não a do microfone.
+        try {
+          const AudioCtx =
+            window.AudioContext ??
+            (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+          if (!AudioCtx) throw new Error("sem AudioContext");
+          const ctx = new AudioCtx();
+          const source = ctx.createMediaStreamSource(cru);
+          const gain = ctx.createGain();
+          gain.gain.value = prefsRef.current.inputGain;
+          const destino = ctx.createMediaStreamDestination();
+          source.connect(gain);
+          gain.connect(destino);
+          gainCtxRef.current = ctx;
+          gainNodeRef.current = gain;
+          micStreamRef.current = destino.stream;
+        } catch {
+          // Sem Web Audio a mesa continua funcionando; só o ganho fica sem efeito.
+          gainCtxRef.current = null;
+          gainNodeRef.current = null;
+          micStreamRef.current = cru;
+        }
       } catch {
         setError("Não consegui acessar o microfone. Você entrou apenas como ouvinte.");
-          micStreamRef.current = null;
-        }
+        micRawRef.current = null;
+        micStreamRef.current = null;
+      }
       setMicStreamState(micStreamRef.current);
       if (cancelled) return;
 
@@ -182,7 +235,8 @@ export function useVoiceRoom(channelId: string | null, userId: string | null) {
         try {
           if (msg.description) {
             const offerCollision =
-              msg.description.type === "offer" && (box.makingOffer || pc.signalingState !== "stable");
+              msg.description.type === "offer" &&
+              (box.makingOffer || pc.signalingState !== "stable");
             box.ignoreOffer = !box.polite && offerCollision;
             if (box.ignoreOffer) return;
             await pc.setRemoteDescription(msg.description);
@@ -224,6 +278,12 @@ export function useVoiceRoom(channelId: string | null, userId: string | null) {
       setRemotePeers([]);
       micStreamRef.current?.getTracks().forEach((t) => t.stop());
       micStreamRef.current = null;
+      // A faixa crua é outra: parar só a processada deixaria o microfone aberto.
+      micRawRef.current?.getTracks().forEach((t) => t.stop());
+      micRawRef.current = null;
+      void gainCtxRef.current?.close();
+      gainCtxRef.current = null;
+      gainNodeRef.current = null;
       setMicStreamState(null);
       videoStreamRef.current?.getTracks().forEach((t) => t.stop());
       videoStreamRef.current = null;
@@ -235,6 +295,11 @@ export function useVoiceRoom(channelId: string | null, userId: string | null) {
   }, [channelId, userId, createPeer, dropPeer, send]);
 
   // ---- controls -----------------------------------------------------------
+  // Mexer no slider vale na hora, sem sair e voltar para a mesa.
+  useEffect(() => {
+    if (gainNodeRef.current) gainNodeRef.current.gain.value = prefs.inputGain;
+  }, [prefs.inputGain]);
+
   const toggleMic = useCallback(() => {
     const tracks = micStreamRef.current?.getAudioTracks() ?? [];
     const next = !micOn;
@@ -265,8 +330,13 @@ export function useVoiceRoom(channelId: string | null, userId: string | null) {
       try {
         const stream =
           mode === "screen"
-            ? await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true })
-            : await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
+            ? await navigator.mediaDevices.getDisplayMedia({
+                video: { frameRate: 30 },
+                audio: true,
+              })
+            : await navigator.mediaDevices.getUserMedia({
+                video: videoConstraints(prefsRef.current),
+              });
 
         videoStreamRef.current?.getTracks().forEach((t) => t.stop());
         videoStreamRef.current = stream;

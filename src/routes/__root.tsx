@@ -12,6 +12,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AuthProvider } from "@/lib/auth";
+import { MediaPrefsProvider } from "@/lib/mediaPrefs";
 import { VoiceProvider } from "@/lib/voice";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -21,9 +22,7 @@ function NotFoundComponent() {
       <div className="max-w-md text-center">
         <h1 className="text-7xl font-bold text-foreground">404</h1>
         <h2 className="mt-4 text-xl font-semibold text-foreground">Página não encontrada</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Essa página não existe ou foi movida.
-        </p>
+        <p className="mt-2 text-sm text-muted-foreground">Essa página não existe ou foi movida.</p>
         <div className="mt-6">
           <Link
             to="/"
@@ -126,12 +125,15 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        {/* Acima das rotas: a sessão de voz sobrevive à troca de canal. */}
-        <VoiceProvider>
-          {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-          <Outlet />
-          <Toaster position="top-center" />
-        </VoiceProvider>
+        {/* Acima das rotas: a sessão de voz sobrevive à troca de canal.
+            As preferências de mídia vêm por fora porque a voz depende delas. */}
+        <MediaPrefsProvider>
+          <VoiceProvider>
+            {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+            <Outlet />
+            <Toaster position="top-center" />
+          </VoiceProvider>
+        </MediaPrefsProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

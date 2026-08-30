@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { useVoiceRoom, type RemotePeer } from "@/hooks/useVoiceRoom";
+import { useMediaPrefs } from "@/lib/mediaPrefs";
 import { useSpeaking } from "@/hooks/useSpeaking";
 
 export type VoiceTarget = { channelId: string; channelName: string; serverId: string };
@@ -36,11 +37,34 @@ type VoiceContextValue = {
 const VoiceContext = createContext<VoiceContextValue | null>(null);
 
 /** Toca o áudio de um participante. Vive no provider para sobreviver à troca de canal. */
-function AudioSink({ peer }: { peer: RemotePeer }) {
+function AudioSink({
+  peer,
+  speakerId,
+  volume,
+}: {
+  peer: RemotePeer;
+  speakerId: string | null;
+  volume: number;
+}) {
   const ref = useRef<HTMLAudioElement | null>(null);
+
   useEffect(() => {
     if (ref.current) ref.current.srcObject = peer.stream;
   }, [peer.stream]);
+
+  useEffect(() => {
+    if (ref.current) ref.current.volume = volume;
+  }, [volume]);
+
+  useEffect(() => {
+    const el = ref.current as
+      (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null;
+    // setSinkId não existe em todo navegador (Firefox só com flag). Sem ele, o
+    // áudio sai no dispositivo padrão do sistema — degrada, não quebra.
+    if (!el?.setSinkId || !speakerId) return;
+    void el.setSinkId(speakerId).catch(() => undefined);
+  }, [speakerId]);
+
   return <audio ref={ref} autoPlay playsInline />;
 }
 
@@ -55,7 +79,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const [active, setActive] = useState<VoiceTarget | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const room = useVoiceRoom(active?.channelId ?? null, userId);
+  const { prefs } = useMediaPrefs();
+  const room = useVoiceRoom(active?.channelId ?? null, userId, prefs);
   const activeChannelId = active?.channelId ?? null;
 
   // Sair junto com a sessão do usuário.
@@ -177,7 +202,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       {children}
       {/* Áudio dos participantes: montado aqui para não parar ao trocar de canal. */}
       {room.remotePeers.map((p) => (
-        <AudioSink key={p.userId} peer={p} />
+        <AudioSink
+          key={p.userId}
+          peer={p}
+          speakerId={prefs.speakerId}
+          volume={prefs.outputVolume}
+        />
       ))}
     </VoiceContext.Provider>
   );

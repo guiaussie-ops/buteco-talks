@@ -17,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { VoiceVideoSettings } from "@/components/app/VoiceVideoSettings";
 import { cn } from "@/lib/utils";
 
 const BIO_MAX = 280;
@@ -55,6 +56,8 @@ export function AccountSettingsDialog({ open, onOpenChange }: Props) {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingPassword, setSavingPassword] = useState(false);
+  // A aba é controlada porque o medidor de nível só pode capturar quando visível.
+  const [aba, setAba] = useState("perfil");
 
   // Reabrir volta aos valores salvos; ninguém quer achar um rascunho velho.
   useEffect(() => {
@@ -65,6 +68,7 @@ export function AccountSettingsDialog({ open, onOpenChange }: Props) {
     setCurrentPassword("");
     setNewPassword("");
     setConfirmPassword("");
+    setAba("perfil");
   }, [open, profile, session]);
 
   const nome = displayName.trim();
@@ -216,11 +220,16 @@ export function AccountSettingsDialog({ open, onOpenChange }: Props) {
           <DialogDescription>Sua cara no buteco e os dados de acesso.</DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue="perfil">
-          <TabsList className="grid w-full grid-cols-2">
+        <Tabs value={aba} onValueChange={setAba}>
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="perfil">Perfil</TabsTrigger>
+            <TabsTrigger value="voz">Voz e vídeo</TabsTrigger>
             <TabsTrigger value="conta">Acesso</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="voz" className="mt-6">
+            <VoiceVideoSettings ativo={open && aba === "voz"} />
+          </TabsContent>
 
           <TabsContent value="perfil" className="mt-6 space-y-5">
             <div className="flex items-center gap-4">
