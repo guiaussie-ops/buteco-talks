@@ -1,0 +1,11 @@
+{
+  // Só o nome do Worker. Sem isto o nitro gera um nome a partir do repositório
+  // ("drguilhermercastro-eng-buteco-talks") e a URL pública fica comprida.
+  //
+  // O resto da configuração de deploy NÃO vai aqui: o nitro monta
+  // .output/server/wrangler.json a cada build, com `main`, o binding de assets,
+  // compatibility_date e a flag nodejs_compat, e é esse arquivo que o wrangler
+  // usa (via .wrangler/deploy/config.json). Repetir esses campos aqui só geraria
+  // aviso de "overridden and will be ignored".
+  "name": "buteco-talks"
+}

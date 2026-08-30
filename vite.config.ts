@@ -19,5 +19,8 @@ export default defineConfig({
     // na minha máquina e no CI do Cloudflare.
     // Para migrar de hospedagem, troque por "vercel", "netlify", "node-server"...
     preset: "cloudflare-module",
+    // O nome do Worker vem do wrangler.jsonc na raiz — o nitro procura por ele
+    // e mescla. Daria para passar por aqui (`cloudflare.wrangler.name`), mas
+    // esse campo não existe na tipagem do preset e exigiria um cast.
   },
 });
