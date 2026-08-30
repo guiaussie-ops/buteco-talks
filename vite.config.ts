@@ -12,4 +12,12 @@ export default defineConfig({
     // nitro/vite builds from this
     server: { entry: "server" },
   },
+  nitro: {
+    // Alvo do deploy: Cloudflare Workers. O preset vinha só como `defaultPreset`,
+    // que é fallback e cede para a detecção automática do nitro (Vercel, Netlify
+    // etc. se anunciam por variável de ambiente). Fixando aqui, o build sai igual
+    // na minha máquina e no CI do Cloudflare.
+    // Para migrar de hospedagem, troque por "vercel", "netlify", "node-server"...
+    preset: "cloudflare-module",
+  },
 });
