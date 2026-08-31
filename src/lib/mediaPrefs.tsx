@@ -23,9 +23,12 @@ export type MediaPrefs = {
    */
   peerVolumes: Record<string, number>;
   /**
-   * Filtros que o próprio navegador aplica no pipeline de captura. Ligados por
-   * padrão: é o que o app sempre fez, e é o que faz o microfone soar bem sem
-   * ninguém configurar nada.
+   * Filtros que o próprio navegador aplica no pipeline de captura.
+   *
+   * Ruído e ganho automático vêm ligados, que é o que faz o microfone soar bem
+   * sem ninguém configurar nada. O cancelamento de eco vem DESLIGADO: aqui a
+   * maioria usa fone, e nesse caso ele não tem eco para cancelar — só corta
+   * pedaço de palavra à toa. Quem usa caixa de som liga na mão.
    */
   echoCancellation: boolean;
   noiseSuppression: boolean;
@@ -39,7 +42,7 @@ export const MEDIA_PREFS_PADRAO: MediaPrefs = {
   inputGain: 1,
   outputVolume: 1,
   peerVolumes: {},
-  echoCancellation: true,
+  echoCancellation: false,
   noiseSuppression: true,
   autoGainControl: true,
 };
@@ -70,11 +73,11 @@ function ler(): MediaPrefs {
       inputGain: clamp(salvo.inputGain ?? 1, 0, 2),
       outputVolume: clamp(salvo.outputVolume ?? 1, 0, 1),
       peerVolumes: lerPeerVolumes(salvo.peerVolumes),
-      // `?? true` e não `!!`: campo ausente (preferência gravada por uma versão
-      // antiga) tem que virar ligado, não desligado.
-      echoCancellation: salvo.echoCancellation ?? true,
-      noiseSuppression: salvo.noiseSuppression ?? true,
-      autoGainControl: salvo.autoGainControl ?? true,
+      // `??` e não `!!`: campo ausente (preferência gravada por uma versão
+      // antiga) tem que cair no padrão, não virar false na marra.
+      echoCancellation: salvo.echoCancellation ?? MEDIA_PREFS_PADRAO.echoCancellation,
+      noiseSuppression: salvo.noiseSuppression ?? MEDIA_PREFS_PADRAO.noiseSuppression,
+      autoGainControl: salvo.autoGainControl ?? MEDIA_PREFS_PADRAO.autoGainControl,
     };
   } catch {
     // Janela anônima, storage bloqueado, JSON corrompido: segue no padrão.

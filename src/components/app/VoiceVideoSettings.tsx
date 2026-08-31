@@ -432,8 +432,7 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
           "Cancelamento de eco",
           prefs.echoCancellation,
           (v) => setPrefs({ echoCancellation: v }),
-          "Impede que o som da mesa saindo pela caixa volte pelo seu microfone.",
-          "Sem fone de ouvido, desligar isto devolve o eco para a mesa inteira.",
+          "Ligue se você ouve a mesa pela caixa de som: impede que esse som volte pelo seu microfone. Com fone não há eco para cancelar, e ligado ele corta pedaços de palavra à toa.",
         )}
         {interruptor(
           "agc",
