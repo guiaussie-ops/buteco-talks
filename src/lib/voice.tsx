@@ -28,6 +28,9 @@ type VoiceContextValue = {
   remotePeers: RemotePeer[];
   speaking: Record<string, boolean>;
   participantCount: number;
+  /** volume individual de cada participante (0 a 1, 1 = sem atenuar) */
+  peerVolumes: Record<string, number>;
+  setPeerVolume: (userId: string, volume: number) => void;
   busy: boolean;
   join: (target: VoiceTarget) => void;
   leave: () => void;
@@ -79,7 +82,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const [active, setActive] = useState<VoiceTarget | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const { prefs } = useMediaPrefs();
+  const { prefs, setPrefs } = useMediaPrefs();
   const room = useVoiceRoom(active?.channelId ?? null, userId, prefs);
   const activeChannelId = active?.channelId ?? null;
 
@@ -141,6 +144,14 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
   const leave = useCallback(() => setActive(null), []);
 
+  const setPeerVolume = useCallback(
+    (peerId: string, volume: number) => {
+      const v = Math.min(1, Math.max(0, volume));
+      setPrefs((atual) => ({ peerVolumes: { ...atual.peerVolumes, [peerId]: v } }));
+    },
+    [setPrefs],
+  );
+
   const toggleVideo = useCallback(
     async (mode: "camera" | "screen") => {
       if (!activeChannelId || !userId) return;
@@ -189,12 +200,14 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       remotePeers: room.remotePeers,
       speaking,
       participantCount: room.participantCount,
+      peerVolumes: prefs.peerVolumes,
+      setPeerVolume,
       busy,
       join,
       leave,
       toggleVideo,
     }),
-    [active, room, speaking, busy, join, leave, toggleVideo],
+    [active, room, speaking, prefs.peerVolumes, setPeerVolume, busy, join, leave, toggleVideo],
   );
 
   return (
@@ -206,7 +219,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           key={p.userId}
           peer={p}
           speakerId={prefs.speakerId}
-          volume={prefs.outputVolume}
+          volume={prefs.outputVolume * (prefs.peerVolumes[p.userId] ?? 1)}
         />
       ))}
     </VoiceContext.Provider>

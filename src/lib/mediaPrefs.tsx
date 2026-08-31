@@ -17,6 +17,11 @@ export type MediaPrefs = {
   inputGain: number;
   /** volume com que você ouve a mesa (0 a 1) */
   outputVolume: number;
+  /**
+   * Volume por participante (0 a 1), só atenuação: multiplica o volume de saída.
+   * Chaveado por user_id, então a escolha vale para a pessoa em qualquer mesa.
+   */
+  peerVolumes: Record<string, number>;
 };
 
 export const MEDIA_PREFS_PADRAO: MediaPrefs = {
@@ -25,13 +30,17 @@ export const MEDIA_PREFS_PADRAO: MediaPrefs = {
   cameraId: null,
   inputGain: 1,
   outputVolume: 1,
+  peerVolumes: {},
 };
 
 const CHAVE = "buteco:media-prefs";
 
+/** Patch direto ou calculado a partir do estado atual (para mapas como peerVolumes). */
+type PrefsPatch = Partial<MediaPrefs> | ((atual: MediaPrefs) => Partial<MediaPrefs>);
+
 type Ctx = {
   prefs: MediaPrefs;
-  setPrefs: (patch: Partial<MediaPrefs>) => void;
+  setPrefs: (patch: PrefsPatch) => void;
 };
 
 const MediaPrefsContext = createContext<Ctx | null>(null);
@@ -49,11 +58,22 @@ function ler(): MediaPrefs {
       ...salvo,
       inputGain: clamp(salvo.inputGain ?? 1, 0, 2),
       outputVolume: clamp(salvo.outputVolume ?? 1, 0, 1),
+      peerVolumes: lerPeerVolumes(salvo.peerVolumes),
     };
   } catch {
     // Janela anônima, storage bloqueado, JSON corrompido: segue no padrão.
     return MEDIA_PREFS_PADRAO;
   }
+}
+
+/** Descarta entradas corrompidas em vez de deixar um NaN silenciar alguém. */
+function lerPeerVolumes(cru: unknown): Record<string, number> {
+  if (!cru || typeof cru !== "object") return {};
+  const saida: Record<string, number> = {};
+  for (const [id, v] of Object.entries(cru as Record<string, unknown>)) {
+    if (typeof v === "number" && Number.isFinite(v)) saida[id] = clamp(v, 0, 1);
+  }
+  return saida;
 }
 
 function clamp(v: number, min: number, max: number) {
@@ -70,9 +90,9 @@ export function MediaPrefsProvider({ children }: { children: ReactNode }) {
     setPrefsState(ler());
   }, []);
 
-  const setPrefs = useCallback((patch: Partial<MediaPrefs>) => {
+  const setPrefs = useCallback((patch: PrefsPatch) => {
     setPrefsState((atual) => {
-      const proximo = { ...atual, ...patch };
+      const proximo = { ...atual, ...(typeof patch === "function" ? patch(atual) : patch) };
       try {
         window.localStorage.setItem(CHAVE, JSON.stringify(proximo));
       } catch {
