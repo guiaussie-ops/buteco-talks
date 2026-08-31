@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { SWEEP_MS } from "@/lib/voicePresence";
 
 type Row = { channel_id: string; user_id: string };
 type Op = { kind: "add" | "remove"; channelId: string; userId: string };
@@ -52,25 +53,39 @@ export function useVoiceRoster(
     inFlightRef.current = true;
     pendingRef.current = [];
 
-    void supabase
-      .from("voice_participants")
-      .select("channel_id, user_id")
-      .in("channel_id", Array.from(idsRef.current))
-      .then(({ data, error }) => {
-        if (error) console.error("Falha ao ler quem está nas mesas de voz", error);
-        // Um fetch mais novo (ou o desmonte) já assumiu: esta resposta é obsoleta.
-        if (!active) return;
+    void (async () => {
+      // Varre antes de ler: assim a lista já nasce sem fantasma, em vez de
+      // mostrar um e corrigir quando o DELETE chegar pelo Realtime.
+      const { error: sweepError } = await supabase.rpc("voice_sweep");
+      if (sweepError) console.error("Falha ao varrer presenças de voz vencidas", sweepError);
 
-        let next: Roster = {};
-        ((data ?? []) as Row[]).forEach((r) => {
-          (next[r.channel_id] ??= []).push(r.user_id);
-        });
-        for (const op of pendingRef.current) next = applyOp(next, op);
+      const { data, error } = await supabase
+        .from("voice_participants")
+        .select("channel_id, user_id")
+        .in("channel_id", Array.from(idsRef.current));
+      if (error) console.error("Falha ao ler quem está nas mesas de voz", error);
+      // Um fetch mais novo (ou o desmonte) já assumiu: esta resposta é obsoleta.
+      if (!active) return;
 
-        inFlightRef.current = false;
-        pendingRef.current = [];
-        setRoster(next);
+      let next: Roster = {};
+      ((data ?? []) as Row[]).forEach((r) => {
+        (next[r.channel_id] ??= []).push(r.user_id);
       });
+      for (const op of pendingRef.current) next = applyOp(next, op);
+
+      inFlightRef.current = false;
+      pendingRef.current = [];
+      setRoster(next);
+    })();
+
+    // Quem está só olhando a lista também precisa varrer: sem ninguém sentado em
+    // mesa nenhuma, não existe heartbeat para fazer esse trabalho. Cada remoção
+    // vira um DELETE do Realtime, então a tampinha some sozinha aqui embaixo.
+    const varredura = window.setInterval(() => {
+      void supabase.rpc("voice_sweep").then(({ error }) => {
+        if (error) console.error("Falha ao varrer presenças de voz vencidas", error);
+      });
+    }, SWEEP_MS);
 
     const apply = (op: Op) => {
       if (!idsRef.current.has(op.channelId)) return;
@@ -102,6 +117,7 @@ export function useVoiceRoster(
 
     return () => {
       active = false;
+      window.clearInterval(varredura);
       inFlightRef.current = false;
       pendingRef.current = [];
       void supabase.removeChannel(chan);

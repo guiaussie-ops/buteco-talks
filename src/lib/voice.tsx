@@ -14,6 +14,7 @@ import { useAuth } from "@/lib/auth";
 import { useVoiceRoom, type RemotePeer } from "@/hooks/useVoiceRoom";
 import { useMediaPrefs } from "@/lib/mediaPrefs";
 import { useSpeaking } from "@/hooks/useSpeaking";
+import { HEARTBEAT_MS, saidaComKeepalive } from "@/lib/voicePresence";
 
 export type VoiceTarget = { channelId: string; channelName: string; serverId: string };
 
@@ -78,6 +79,12 @@ function AudioSink({
 export function VoiceProvider({ children }: { children: ReactNode }) {
   const { session, isAdult } = useAuth();
   const userId = session?.user.id ?? null;
+  /**
+   * O token entra por ref porque quem lê é o handler de fechamento da aba, que
+   * não pode esperar um `getSession()` assíncrono: a página já está morrendo.
+   */
+  const accessTokenRef = useRef(session?.access_token ?? null);
+  accessTokenRef.current = session?.access_token ?? null;
 
   const [active, setActive] = useState<VoiceTarget | null>(null);
   const [busy, setBusy] = useState(false);
@@ -130,6 +137,73 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         .then(({ error }) => {
           if (error) console.error("Falha ao remover presença da mesa de voz", error);
         });
+    };
+  }, [activeChannelId, userId]);
+
+  // Camada 2: batida periódica que mantém a presença viva e, de carona, varre
+  // os fantasmas de todo mundo. Ver src/lib/voicePresence.ts.
+  useEffect(() => {
+    if (!activeChannelId || !userId) return;
+    let cancelled = false;
+
+    const bater = () => {
+      if (cancelled) return;
+      void supabase.rpc("voice_heartbeat", { _channel_id: activeChannelId }).then(({ error }) => {
+        if (error) console.error("Falha no heartbeat da mesa de voz", error);
+      });
+    };
+
+    bater();
+    const timer = window.setInterval(bater, HEARTBEAT_MS);
+
+    // Timer de aba oculta chega atrasado; ao voltar para a frente, bate na hora
+    // para não ficar pendurado num beat velho. `pageshow` cobre a volta do
+    // bfcache (o "voltar" do celular), em que a saída já foi enviada.
+    const aoVoltar = () => {
+      if (document.visibilityState === "visible") bater();
+    };
+    document.addEventListener("visibilitychange", aoVoltar);
+    window.addEventListener("pageshow", bater);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", aoVoltar);
+      window.removeEventListener("pageshow", bater);
+    };
+  }, [activeChannelId, userId]);
+
+  // Camada 1: aba fechando (X, recarregar, navegar para fora). Sai na hora, em
+  // vez de deixar a expiração levar 150s para perceber.
+  //
+  // `visibilitychange -> hidden` NÃO entra aqui de propósito: minimizar a janela
+  // para jogar é o uso normal do app, não uma saída.
+  useEffect(() => {
+    if (!activeChannelId || !userId) return;
+
+    let jaSaiu = false;
+    const sair = () => {
+      if (jaSaiu) return;
+      jaSaiu = true;
+      const token = accessTokenRef.current;
+      if (token) saidaComKeepalive(activeChannelId, userId, token);
+    };
+    // Restaurada do bfcache: a saída já foi mandada, mas a pessoa continua na
+    // mesa. Libera o gatilho e deixa o heartbeat recolocá-la.
+    const aoRestaurar = (e: PageTransitionEvent) => {
+      if (e.persisted) jaSaiu = false;
+    };
+
+    // pagehide é o único confiável no Safari/iOS; beforeunload é o reforço no
+    // desktop. Os dois disparando é inofensivo, o segundo vira no-op.
+    window.addEventListener("pagehide", sair);
+    window.addEventListener("beforeunload", sair);
+    window.addEventListener("pageshow", aoRestaurar);
+
+    return () => {
+      window.removeEventListener("pagehide", sair);
+      window.removeEventListener("beforeunload", sair);
+      window.removeEventListener("pageshow", aoRestaurar);
     };
   }, [activeChannelId, userId]);
 

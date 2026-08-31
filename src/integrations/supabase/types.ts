@@ -176,6 +176,7 @@ export type Database = {
           channel_id: string
           id: string
           joined_at: string
+          last_seen_at: string
           muted: boolean
           screen_sharing: boolean
           user_id: string
@@ -185,6 +186,7 @@ export type Database = {
           channel_id: string
           id?: string
           joined_at?: string
+          last_seen_at?: string
           muted?: boolean
           screen_sharing?: boolean
           user_id: string
@@ -194,6 +196,7 @@ export type Database = {
           channel_id?: string
           id?: string
           joined_at?: string
+          last_seen_at?: string
           muted?: boolean
           screen_sharing?: boolean
           user_id?: string
@@ -229,6 +232,8 @@ export type Database = {
         Args: { _me: string; _other: string }
         Returns: boolean
       }
+      voice_heartbeat: { Args: { _channel_id: string }; Returns: undefined }
+      voice_sweep: { Args: Record<PropertyKey, never>; Returns: number }
     }
     Enums: {
       [_ in never]: never
