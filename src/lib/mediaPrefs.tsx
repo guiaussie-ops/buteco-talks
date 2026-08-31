@@ -22,6 +22,14 @@ export type MediaPrefs = {
    * Chaveado por user_id, então a escolha vale para a pessoa em qualquer mesa.
    */
   peerVolumes: Record<string, number>;
+  /**
+   * Filtros que o próprio navegador aplica no pipeline de captura. Ligados por
+   * padrão: é o que o app sempre fez, e é o que faz o microfone soar bem sem
+   * ninguém configurar nada.
+   */
+  echoCancellation: boolean;
+  noiseSuppression: boolean;
+  autoGainControl: boolean;
 };
 
 export const MEDIA_PREFS_PADRAO: MediaPrefs = {
@@ -31,6 +39,9 @@ export const MEDIA_PREFS_PADRAO: MediaPrefs = {
   inputGain: 1,
   outputVolume: 1,
   peerVolumes: {},
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
 };
 
 const CHAVE = "buteco:media-prefs";
@@ -59,6 +70,11 @@ function ler(): MediaPrefs {
       inputGain: clamp(salvo.inputGain ?? 1, 0, 2),
       outputVolume: clamp(salvo.outputVolume ?? 1, 0, 1),
       peerVolumes: lerPeerVolumes(salvo.peerVolumes),
+      // `?? true` e não `!!`: campo ausente (preferência gravada por uma versão
+      // antiga) tem que virar ligado, não desligado.
+      echoCancellation: salvo.echoCancellation ?? true,
+      noiseSuppression: salvo.noiseSuppression ?? true,
+      autoGainControl: salvo.autoGainControl ?? true,
     };
   } catch {
     // Janela anônima, storage bloqueado, JSON corrompido: segue no padrão.
@@ -117,11 +133,12 @@ export function useMediaPrefs() {
 export function audioConstraints(prefs: MediaPrefs): MediaTrackConstraints {
   // Estes três são o processamento que o navegador faz no próprio pipeline de
   // captura — o mesmo que o Discord usa. O ganho automático é o que levanta voz
-  // fraca; sem ele o microfone chega baixo na mesa.
+  // fraca; sem ele o microfone chega baixo na mesa. Ficam ligados por padrão e
+  // só saem se a pessoa desligar na mão, sabendo o que perde.
   const base: MediaTrackConstraints = {
-    echoCancellation: true,
-    noiseSuppression: true,
-    autoGainControl: true,
+    echoCancellation: prefs.echoCancellation,
+    noiseSuppression: prefs.noiseSuppression,
+    autoGainControl: prefs.autoGainControl,
     // Voz é mono. Pedir um canal evita upmix e corta banda pela metade.
     channelCount: 1,
   };
@@ -136,4 +153,13 @@ export function videoConstraints(prefs: MediaPrefs): MediaTrackConstraints {
   const base: MediaTrackConstraints = { width: 1280, height: 720 };
   if (prefs.cameraId) base.deviceId = { ideal: prefs.cameraId };
   return base;
+}
+
+/** Só os três filtros, para aplicar ao vivo numa faixa já aberta. */
+export function filtrosDeAudio(prefs: MediaPrefs) {
+  return {
+    echoCancellation: prefs.echoCancellation,
+    noiseSuppression: prefs.noiseSuppression,
+    autoGainControl: prefs.autoGainControl,
+  };
 }

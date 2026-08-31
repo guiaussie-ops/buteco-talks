@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   audioConstraints,
+  filtrosDeAudio,
   videoConstraints,
   MEDIA_PREFS_PADRAO,
   type MediaPrefs,
@@ -165,6 +166,34 @@ export function useVoiceRoom(
     gainNodeRef.current = null;
     publicarFaixaDeAudio(micRawRef.current);
   }, [publicarFaixaDeAudio]);
+
+  /**
+   * Reabre o microfone com as constraints atuais e bota a faixa nova no ar.
+   * Só é usado quando o navegador não aceita trocar um filtro na faixa aberta.
+   */
+  const recapturarMicrofone = useCallback(async () => {
+    let novo: MediaStream;
+    try {
+      novo = await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraints(prefsRef.current),
+      });
+    } catch {
+      // Trocar uma faixa que funciona por nenhuma seria pior que ignorar a
+      // preferência: fica com a atual.
+      return;
+    }
+    const antigo = micRawRef.current;
+    micRawRef.current = novo;
+    aplicarMudo(novo);
+    // replaceTrack por baixo dos panos: ninguém cai da mesa e não há renegociação.
+    if (gainNodeRef.current) {
+      desmontarGrafoDeGanho();
+      montarGrafoDeGanho(prefsRef.current.inputGain);
+    } else {
+      publicarFaixaDeAudio(novo);
+    }
+    antigo?.getTracks().forEach((t) => t.stop());
+  }, [aplicarMudo, desmontarGrafoDeGanho, montarGrafoDeGanho, publicarFaixaDeAudio]);
 
   const createPeer = useCallback(
     (remoteId: string, polite: boolean) => {
@@ -374,6 +403,36 @@ export function useVoiceRoom(
     if (prefs.inputGain === 1) desmontarGrafoDeGanho();
     else montarGrafoDeGanho(prefs.inputGain);
   }, [prefs.inputGain, montarGrafoDeGanho, desmontarGrafoDeGanho]);
+
+  // Filtros do navegador ao vivo. O caminho barato é applyConstraints na faixa
+  // já aberta; o Chrome costuma aceitar a chamada sem trocar nada de fato, então
+  // conferimos o resultado em getSettings e só reabrimos o microfone se preciso.
+  useEffect(() => {
+    const faixa = micRawRef.current?.getAudioTracks()[0];
+    if (!faixa) return;
+    let cancelado = false;
+    const alvo = filtrosDeAudio(prefsRef.current);
+
+    void (async () => {
+      try {
+        await faixa.applyConstraints(alvo);
+      } catch {
+        // Recusou de cara: cai direto para a recaptura.
+      }
+      if (cancelado) return;
+      const agora = faixa.getSettings();
+      // Campo que o navegador não reporta não conta como divergência, senão
+      // entraríamos em recaptura eterna num browser que só omite a informação.
+      const pegou = (Object.keys(alvo) as (keyof typeof alvo)[]).every(
+        (k) => agora[k] === undefined || agora[k] === alvo[k],
+      );
+      if (!pegou) await recapturarMicrofone();
+    })();
+
+    return () => {
+      cancelado = true;
+    };
+  }, [prefs.echoCancellation, prefs.noiseSuppression, prefs.autoGainControl, recapturarMicrofone]);
 
   const toggleMic = useCallback(() => {
     const next = !micOn;

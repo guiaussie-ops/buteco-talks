@@ -6,6 +6,7 @@ import {
   Mic,
   Play,
   ShieldAlert,
+  SlidersHorizontal,
   Square,
   Volume2,
 } from "lucide-react";
@@ -229,14 +230,21 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
     void el.setSinkId(prefs.speakerId).catch(() => undefined);
   }, [prefs.speakerId, testando]);
 
-  // Trocar de microfone no meio do teste reabre a captura no aparelho novo.
-  // Só isso: as outras preferências não têm por que derrubar o microfone.
-  const micAnteriorRef = useRef(prefs.micId);
+  // O que só pode mudar reabrindo a captura: o aparelho e os filtros do
+  // navegador. Ganho e volume continuam entrando ao vivo, sem derrubar o
+  // microfone — era esse o bug de arrastar qualquer slider.
+  const assinaturaDaCaptura = [
+    prefs.micId,
+    prefs.echoCancellation,
+    prefs.noiseSuppression,
+    prefs.autoGainControl,
+  ].join("|");
+  const capturaAnteriorRef = useRef(assinaturaDaCaptura);
   useEffect(() => {
-    if (micAnteriorRef.current === prefs.micId) return;
-    micAnteriorRef.current = prefs.micId;
+    if (capturaAnteriorRef.current === assinaturaDaCaptura) return;
+    capturaAnteriorRef.current = assinaturaDaCaptura;
     if (testandoRef.current) void iniciarTeste();
-  }, [prefs.micId, iniciarTeste]);
+  }, [assinaturaDaCaptura, iniciarTeste]);
 
   // Fechar as configurações (ou desmontar) sempre larga o microfone.
   useEffect(() => {
@@ -291,6 +299,38 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
           </option>
         ))}
       </select>
+    </div>
+  );
+
+  const interruptor = (
+    id: string,
+    rotulo: string,
+    valor: boolean,
+    aoTrocar: (v: boolean) => void,
+    explicacao: string,
+    aviso?: string,
+  ) => (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-3">
+        <Label htmlFor={id} className="text-sm font-normal">
+          {rotulo}
+        </Label>
+        <Switch
+          id={id}
+          checked={valor}
+          onCheckedChange={(v) => {
+            renovarTeste();
+            aoTrocar(v);
+          }}
+        />
+      </div>
+      <p className="text-muted-foreground text-xs">{explicacao}</p>
+      {!valor && aviso && (
+        <p className="text-warning flex items-start gap-1.5 text-xs">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+          {aviso}
+        </p>
+      )}
     </div>
   );
 
@@ -369,6 +409,39 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
               acontecer, eu corto sozinho.
             </p>
           </div>
+        )}
+      </div>
+
+      <div className="border-border space-y-4 border-t pt-5">
+        <Label className="flex items-center gap-2">
+          <SlidersHorizontal className="size-4" /> Filtros do microfone
+        </Label>
+        <p className="text-muted-foreground -mt-2 text-xs">
+          Tratamento que o próprio navegador faz na captura. Na dúvida, deixe os três ligados.
+        </p>
+
+        {interruptor(
+          "ruido",
+          "Reduzir ruído de fundo",
+          prefs.noiseSuppression,
+          (v) => setPrefs({ noiseSuppression: v }),
+          "Segura ventilador, ar-condicionado e chiado constante.",
+        )}
+        {interruptor(
+          "eco",
+          "Cancelamento de eco",
+          prefs.echoCancellation,
+          (v) => setPrefs({ echoCancellation: v }),
+          "Impede que o som da mesa saindo pela caixa volte pelo seu microfone.",
+          "Sem fone de ouvido, desligar isto devolve o eco para a mesa inteira.",
+        )}
+        {interruptor(
+          "agc",
+          "Ajuste automático de volume",
+          prefs.autoGainControl,
+          (v) => setPrefs({ autoGainControl: v }),
+          "Empareja o volume: levanta quem fala baixo, segura quem grita.",
+          "Desligado, quem fala baixo chega baixo na mesa — compense no volume de entrada.",
         )}
       </div>
 
