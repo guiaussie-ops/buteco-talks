@@ -8,14 +8,16 @@ import {
   VideoOff,
   PhoneOff,
   Volume2,
-  VolumeX,
   ShieldAlert,
 } from "lucide-react";
 import { useVoice } from "@/lib/voice";
 import { Bottlecap } from "@/components/Bottlecap";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Slider } from "@/components/ui/slider";
+import {
+  ControleDeVolume,
+  SeloDeMudo,
+  useVolumeDoParticipante,
+} from "@/components/app/ControleDeVolume";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -66,7 +68,7 @@ function VideoTile({
 
 /**
  * Tampinha de um participante remoto com o volume individual dela.
- * Abre no clique (e não no hover) porque no celular não existe hover.
+ * O mesmo controle vive na barra lateral — ver ControleDeVolume.
  */
 function PeerCap({
   userId,
@@ -79,41 +81,20 @@ function PeerCap({
   src?: string | null | undefined;
   speaking: boolean;
 }) {
-  const voice = useVoice();
-  const volume = voice.peerVolumes[userId] ?? 1;
-  const percent = Math.round(volume * 100);
+  const { percent } = useVolumeDoParticipante(userId);
 
   return (
     <div className="flex w-16 flex-col items-center gap-1.5">
-      <Popover>
-        <PopoverTrigger
-          className="focus-visible:ring-ring rounded-full focus-visible:ring-2 focus-visible:outline-none"
-          aria-label={`Volume de ${name}: ${percent}%`}
-        >
-          <span className="relative block">
-            <Bottlecap name={name} src={src} speaking={speaking} className="size-12" />
-            {percent === 0 && (
-              <span className="bg-background/85 text-muted-foreground absolute -right-0.5 -bottom-0.5 rounded-full p-0.5">
-                <VolumeX className="size-3" />
-              </span>
-            )}
-          </span>
-        </PopoverTrigger>
-        <PopoverContent align="center" className="w-56 space-y-2 p-3">
-          <p className="truncate text-sm font-medium">{name}</p>
-          <Slider
-            min={0}
-            max={100}
-            step={5}
-            value={[percent]}
-            onValueChange={([v]) => voice.setPeerVolume(userId, (v ?? 100) / 100)}
-            aria-label={`Volume de ${name}`}
-          />
-          <p className="text-muted-foreground text-xs">
-            {percent === 0 ? "Mudo pra você" : `${percent}% — só pra você.`}
-          </p>
-        </PopoverContent>
-      </Popover>
+      <ControleDeVolume userId={userId} name={name} className="rounded-full">
+        <span className="relative block">
+          <Bottlecap name={name} src={src} speaking={speaking} className="size-12" />
+          {percent === 0 && (
+            <span className="bg-background/85 absolute -right-0.5 -bottom-0.5 rounded-full p-0.5">
+              <SeloDeMudo className="size-3" />
+            </span>
+          )}
+        </span>
+      </ControleDeVolume>
       <span className="text-muted-foreground max-w-full truncate text-[11px]">{name}</span>
     </div>
   );

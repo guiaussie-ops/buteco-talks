@@ -16,6 +16,12 @@ import { Bottlecap } from "@/components/Bottlecap";
 import { InviteDialog } from "@/components/app/InviteDialog";
 import { VoiceBar } from "@/components/app/VoiceBar";
 import { useVoice } from "@/lib/voice";
+import { useAuth } from "@/lib/auth";
+import {
+  ControleDeVolume,
+  SeloDeMudo,
+  useVolumeDoParticipante,
+} from "@/components/app/ControleDeVolume";
 import { useVoiceRoster } from "@/hooks/useVoiceRoster";
 import { Settings, MoreVertical, Pencil, Trash2 } from "lucide-react";
 import {
@@ -69,6 +75,48 @@ type Props = {
   avatars: Record<string, string | null>;
 };
 
+/**
+ * Uma pessoa na lista da mesa. A linha inteira é o gatilho do volume, não só a
+ * tampinha: com 20px ela é alvo pequeno demais para o dedo no celular.
+ */
+function ParticipanteSentado({
+  userId,
+  name,
+  avatar,
+  falando,
+  ehVoce,
+}: {
+  userId: string;
+  name: string;
+  avatar: string | null | undefined;
+  falando: boolean;
+  ehVoce: boolean;
+}) {
+  const { percent } = useVolumeDoParticipante(userId);
+
+  const conteudo = (
+    <>
+      <Bottlecap name={name} src={avatar} speaking={falando} className="size-5 text-[10px]" />
+      <span className="text-muted-foreground/80 truncate text-[11px]">{name}</span>
+      {!ehVoce && percent === 0 && <SeloDeMudo className="ml-auto size-3" />}
+    </>
+  );
+
+  // Ninguém se escuta na mesa, então a própria linha não abre controle nenhum.
+  if (ehVoce) return <div className="flex items-center gap-1.5 px-1 py-0.5">{conteudo}</div>;
+
+  return (
+    <ControleDeVolume
+      userId={userId}
+      name={name}
+      align="start"
+      className="hover:bg-surface-2/60 flex w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-left transition-colors"
+    >
+      {conteudo}
+    </ControleDeVolume>
+  );
+}
+
 export function ChannelSidebar({
   serverName,
   inviteCode,
@@ -105,6 +153,8 @@ export function ChannelSidebar({
   const voice = channels.filter((c) => c.kind === "voice");
 
   const voiceSession = useVoice();
+  const { session } = useAuth();
+  const meuId = session?.user.id ?? null;
   const roster = useVoiceRoster(
     serverId,
     voice.map((c) => c.id),
@@ -210,16 +260,16 @@ export function ChannelSidebar({
                   .map((userId) => ({ userId, name: names[userId] ?? "Participante" }))
                   .sort((a, b) => a.name.localeCompare(b.name))
                   .map(({ userId, name }) => (
-                    <li key={userId} className="flex items-center gap-1.5">
-                      <Bottlecap
+                    <li key={userId}>
+                      <ParticipanteSentado
+                        userId={userId}
                         name={name}
-                        src={avatars[userId]}
-                        speaking={
+                        avatar={avatars[userId]}
+                        falando={
                           voiceSession.active?.channelId === c.id && !!voiceSession.speaking[userId]
                         }
-                        className="size-5 text-[10px]"
+                        ehVoce={userId === meuId}
                       />
-                      <span className="text-muted-foreground/80 truncate text-[11px]">{name}</span>
                     </li>
                   ))}
               </ul>

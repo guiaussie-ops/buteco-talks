@@ -85,6 +85,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
    */
   const accessTokenRef = useRef(session?.access_token ?? null);
   accessTokenRef.current = session?.access_token ?? null;
+  /**
+   * Batida de heartbeat ainda voando. A saída espera por ela antes de apagar a
+   * presença: como a batida é um upsert, uma que chegue *depois* do apagamento
+   * ressuscita a linha de quem acabou de sair — o fantasma na barra lateral.
+   */
+  const batidaEmVooRef = useRef<Promise<unknown> | null>(null);
 
   const [active, setActive] = useState<VoiceTarget | null>(null);
   const [busy, setBusy] = useState(false);
@@ -129,14 +135,21 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
     return () => {
       cancelled = true;
-      void supabase
-        .from("voice_participants")
-        .delete()
-        .eq("channel_id", activeChannelId)
-        .eq("user_id", userId)
-        .then(({ error }) => {
-          if (error) console.error("Falha ao remover presença da mesa de voz", error);
-        });
+      const apagar = () =>
+        supabase
+          .from("voice_participants")
+          .delete()
+          .eq("channel_id", activeChannelId)
+          .eq("user_id", userId)
+          .then(({ error }) => {
+            if (error) console.error("Falha ao remover presença da mesa de voz", error);
+          });
+
+      // Sem a espera, uma batida em voo pode ser commitada depois do apagamento
+      // e recriar a linha. Esperar dá a última palavra a quem está saindo.
+      const emVoo = batidaEmVooRef.current;
+      if (emVoo) void emVoo.catch(() => undefined).then(apagar);
+      else void apagar();
     };
   }, [activeChannelId, userId]);
 
@@ -148,8 +161,17 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
     const bater = () => {
       if (cancelled) return;
-      void supabase.rpc("voice_heartbeat", { _channel_id: activeChannelId }).then(({ error }) => {
-        if (error) console.error("Falha no heartbeat da mesa de voz", error);
+      // Promise.resolve porque o builder do supabase-js é só um thenable, e a
+      // saída precisa de um Promise de verdade para encadear.
+      const batida = Promise.resolve(
+        supabase.rpc("voice_heartbeat", { _channel_id: activeChannelId }).then(({ error }) => {
+          if (error) console.error("Falha no heartbeat da mesa de voz", error);
+        }),
+      );
+      batidaEmVooRef.current = batida;
+      void batida.finally(() => {
+        // Só limpa se ninguém mais novo tomou o lugar.
+        if (batidaEmVooRef.current === batida) batidaEmVooRef.current = null;
       });
     };
 

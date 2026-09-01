@@ -50,42 +50,49 @@ export function useVoiceRoster(
     }
     let active = true;
 
-    inFlightRef.current = true;
-    pendingRef.current = [];
-
-    void (async () => {
-      // Varre antes de ler: assim a lista já nasce sem fantasma, em vez de
-      // mostrar um e corrigir quando o DELETE chegar pelo Realtime.
-      const { error: sweepError } = await supabase.rpc("voice_sweep");
-      if (sweepError) console.error("Falha ao varrer presenças de voz vencidas", sweepError);
-
-      const { data, error } = await supabase
-        .from("voice_participants")
-        .select("channel_id, user_id")
-        .in("channel_id", Array.from(idsRef.current));
-      if (error) console.error("Falha ao ler quem está nas mesas de voz", error);
-      // Um fetch mais novo (ou o desmonte) já assumiu: esta resposta é obsoleta.
-      if (!active) return;
-
-      let next: Roster = {};
-      ((data ?? []) as Row[]).forEach((r) => {
-        (next[r.channel_id] ??= []).push(r.user_id);
-      });
-      for (const op of pendingRef.current) next = applyOp(next, op);
-
-      inFlightRef.current = false;
+    /**
+     * Varre os vencidos e relê a lista inteira do banco.
+     *
+     * Roda na montagem e de tempos em tempos. A releitura periódica é o que
+     * torna a lista auto-corrigível: antes ela nascia de um fetch e depois vivia
+     * só de eventos do Realtime, então um único evento perdido deixava um
+     * fantasma na tela até a pessoa trocar de sala. Agora o pior caso é um
+     * ciclo de atraso.
+     */
+    const sincronizar = async () => {
+      inFlightRef.current = true;
       pendingRef.current = [];
-      setRoster(next);
-    })();
+      try {
+        // Varre antes de ler: assim a lista já nasce sem fantasma, em vez de
+        // mostrar um e corrigir quando o DELETE chegar pelo Realtime.
+        const { error: sweepError } = await supabase.rpc("voice_sweep");
+        if (sweepError) console.error("Falha ao varrer presenças de voz vencidas", sweepError);
 
-    // Quem está só olhando a lista também precisa varrer: sem ninguém sentado em
-    // mesa nenhuma, não existe heartbeat para fazer esse trabalho. Cada remoção
-    // vira um DELETE do Realtime, então a tampinha some sozinha aqui embaixo.
-    const varredura = window.setInterval(() => {
-      void supabase.rpc("voice_sweep").then(({ error }) => {
-        if (error) console.error("Falha ao varrer presenças de voz vencidas", error);
-      });
-    }, SWEEP_MS);
+        const { data, error } = await supabase
+          .from("voice_participants")
+          .select("channel_id, user_id")
+          .in("channel_id", Array.from(idsRef.current));
+        if (error) console.error("Falha ao ler quem está nas mesas de voz", error);
+        // Uma sincronização mais nova (ou o desmonte) já assumiu: resposta velha.
+        if (!active) return;
+
+        let next: Roster = {};
+        ((data ?? []) as Row[]).forEach((r) => {
+          (next[r.channel_id] ??= []).push(r.user_id);
+        });
+        // Eventos que chegaram durante a leitura valem por cima dela.
+        for (const op of pendingRef.current) next = applyOp(next, op);
+        setRoster(next);
+      } finally {
+        // No finally para uma falha de rede não deixar a lista presa achando
+        // que existe leitura em voo para sempre.
+        inFlightRef.current = false;
+        pendingRef.current = [];
+      }
+    };
+
+    void sincronizar();
+    const reconciliacao = window.setInterval(() => void sincronizar(), SWEEP_MS);
 
     const apply = (op: Op) => {
       if (!idsRef.current.has(op.channelId)) return;
@@ -117,7 +124,7 @@ export function useVoiceRoster(
 
     return () => {
       active = false;
-      window.clearInterval(varredura);
+      window.clearInterval(reconciliacao);
       inFlightRef.current = false;
       pendingRef.current = [];
       void supabase.removeChannel(chan);
