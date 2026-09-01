@@ -8,6 +8,12 @@ import {
   type MediaPrefs,
 } from "@/lib/mediaPrefs";
 import { ponteDeGate, type PonteDeGate } from "@/lib/gateDeRuido";
+import {
+  TAXA_DO_MODELO,
+  ponteDeSupressor,
+  taxaServe,
+  type PonteDeSupressor,
+} from "@/lib/supressorDeRuido";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 export type RemotePeer = {
@@ -52,8 +58,8 @@ type PeerBox = {
  * Passar o áudio por Web Audio custa: a faixa deixa de ser a que o navegador
  * capturou. Só vale a pena quando há o que fazer com ela.
  */
-function precisaDeGrafo(inputGain: number, noiseGate: boolean) {
-  return inputGain !== 1 || noiseGate;
+function precisaDeGrafo(inputGain: number, noiseGate: boolean, noiseSuppressionIA: boolean) {
+  return inputGain !== 1 || noiseGate || noiseSuppressionIA;
 }
 
 /**
@@ -88,8 +94,16 @@ export function useVoiceRoom(
   const gainNodeRef = useRef<GainNode | null>(null);
   /** Fim do grafo: é o stream dele que vai ao ar enquanto o grafo existir. */
   const destinoRef = useRef<MediaStreamAudioDestinationNode | null>(null);
-  /** Gate de ruído opcional entre o ganho e o destino. */
+  /** Gate de ruído opcional, na segunda metade do grafo. */
   const ponteDoGateRef = useRef<PonteDeGate | null>(null);
+  /** Supressão por IA opcional, na primeira metade. */
+  const ponteDoSupressorRef = useRef<PonteDeSupressor | null>(null);
+  /**
+   * O contexto atual foi aberto já pedindo a taxa do modelo? Sem isto, um
+   * navegador que recusa 48 kHz faria o grafo ser refeito a cada mexida no
+   * slider, para sempre, tentando uma taxa que não vai vir.
+   */
+  const ctxPedidoParaIaRef = useRef(false);
   /** Espelho de micOn, para reaplicar o mudo quando a faixa publicada troca. */
   const micOnRef = useRef(true);
 
@@ -139,45 +153,89 @@ export function useVoiceRoom(
   );
 
   /**
-   * Põe o gate no estado que as preferências pedem, dentro do grafo que já
-   * existe. A faixa publicada não muda: quem sai do grafo é sempre o mesmo
+   * Põe a IA e o gate no estado que as preferências pedem, dentro do grafo que
+   * já existe. A faixa publicada não muda: quem sai do grafo é sempre o mesmo
    * destino, então ninguém na mesa percebe nada além do áudio mudar.
    */
-  const sincronizarGate = useCallback(() => {
-    const { noiseGate, noiseGateThreshold } = prefsRef.current;
+  const sincronizarProcessamento = useCallback(() => {
+    const { noiseGate, noiseGateThreshold, noiseSuppressionIA } = prefsRef.current;
+    ponteDoSupressorRef.current?.sincronizar(noiseSuppressionIA);
     ponteDoGateRef.current?.sincronizar(noiseGate, noiseGateThreshold);
   }, []);
 
+  /** Volta a publicar a faixa crua e derruba o grafo. */
+  const desmontarGrafoDeAudio = useCallback(() => {
+    if (!gainCtxRef.current && !gainNodeRef.current) return;
+    // Antes do close(): as pontes ainda mexem nas conexões ao se desfazer.
+    ponteDoSupressorRef.current?.destruir();
+    ponteDoSupressorRef.current = null;
+    ponteDoGateRef.current?.destruir();
+    ponteDoGateRef.current = null;
+    destinoRef.current = null;
+    void gainCtxRef.current?.close().catch(() => undefined);
+    gainCtxRef.current = null;
+    gainNodeRef.current = null;
+    ctxPedidoParaIaRef.current = false;
+    publicarFaixaDeAudio(micRawRef.current);
+  }, [publicarFaixaDeAudio]);
+
   /**
-   * Só é montado quando a pessoa mexe no volume de entrada ou liga o gate.
-   * Enquanto o slider está em 100% e o gate desligado, a mesa recebe a faixa
-   * crua, sem nenhum processamento nosso.
+   * Só é montado quando a pessoa mexe no volume de entrada, liga o gate ou liga
+   * a IA. Sem nenhum dos três, a mesa recebe a faixa crua, sem nenhum
+   * processamento nosso.
    *
-   * O grafo é `mic → ganho → [gate] → destino`. O gate fica DEPOIS do ganho de
-   * propósito: assim o limiar vive na mesma escala do medidor do teste, e a
-   * linha do limiar não passeia quando alguém mexe no volume de entrada.
+   * O grafo é `mic → ganho → [IA] → meio → [gate] → destino`.
+   *
+   * A ordem não é à toa. Os dois ficam DEPOIS do ganho para o limiar do gate
+   * viver na mesma escala do medidor do teste — a linha do limiar não passeia
+   * quando alguém mexe no volume de entrada. E a IA vem ANTES do gate porque
+   * ela é quem tira o ruído de dentro da voz; o gate só decide passa/não passa,
+   * e decide melhor sobre um sinal já limpo.
+   *
+   * `meio` é um ganho unitário que só serve de emenda: com ele cada ponte mexe
+   * apenas no próprio trecho, e ligar um processador nunca desconecta o outro.
    */
   const montarGrafoDeAudio = useCallback(() => {
     const cru = micRawRef.current;
     if (!cru) return;
-    const ganho = prefsRef.current.inputGain;
-    if (gainNodeRef.current) {
-      gainNodeRef.current.gain.value = ganho;
-      sincronizarGate();
-      return;
+    const { inputGain, noiseSuppressionIA } = prefsRef.current;
+    const ctxAtual = gainCtxRef.current;
+    if (ctxAtual && gainNodeRef.current) {
+      // A taxa nasce com o contexto e não se muda depois. Se a IA acabou de ser
+      // ligada num contexto que o modelo não aceita, o jeito é refazer o grafo:
+      // a faixa publicada troca por replaceTrack, ninguém cai da mesa.
+      if (!noiseSuppressionIA || ctxPedidoParaIaRef.current || taxaServe(ctxAtual.sampleRate)) {
+        gainNodeRef.current.gain.value = inputGain;
+        sincronizarProcessamento();
+        return;
+      }
+      desmontarGrafoDeAudio();
     }
     try {
       const AudioCtx =
         window.AudioContext ??
         (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!AudioCtx) return;
-      const ctx = new AudioCtx();
+      // 48 kHz na marra só quando a IA está ligada: é a taxa em que o modelo
+      // foi treinado. Pedir uma taxa diferente da placa faz o navegador
+      // reamostrar, e esse custo não tem por que cair em quem está sem IA.
+      let ctx: AudioContext;
+      try {
+        ctx = noiseSuppressionIA ? new AudioCtx({ sampleRate: TAXA_DO_MODELO }) : new AudioCtx();
+      } catch {
+        // Navegador que recusa a taxa pedida: abre no padrão dele e a ponte
+        // decide, olhando a taxa que saiu, se dá para ligar a IA.
+        ctx = new AudioCtx();
+      }
+      ctxPedidoParaIaRef.current = noiseSuppressionIA;
       const source = ctx.createMediaStreamSource(cru);
       const gain = ctx.createGain();
-      gain.gain.value = ganho;
+      gain.gain.value = inputGain;
+      const meio = ctx.createGain();
       const destino = ctx.createMediaStreamDestination();
       source.connect(gain);
-      gain.connect(destino);
+      gain.connect(meio);
+      meio.connect(destino);
 
       // Fora de um gesto do usuário o contexto nasce suspenso, e contexto
       // suspenso não gera amostras: silêncio total para a mesa. No iOS ele
@@ -190,32 +248,22 @@ export function useVoiceRoom(
       gainCtxRef.current = ctx;
       gainNodeRef.current = gain;
       destinoRef.current = destino;
-      ponteDoGateRef.current = ponteDeGate(ctx, gain, destino);
-      // A faixa já vai ao ar sem esperar o gate: o gate entra no meio do grafo
-      // depois, e o destino — logo, a faixa publicada — é o mesmo antes e depois.
+      ponteDoSupressorRef.current = ponteDeSupressor(ctx, gain, meio);
+      ponteDoGateRef.current = ponteDeGate(ctx, meio, destino);
+      // A faixa já vai ao ar sem esperar o modelo baixar: os processadores
+      // entram no meio do grafo depois, e o destino — logo, a faixa publicada —
+      // é o mesmo antes e depois.
       publicarFaixaDeAudio(destino.stream);
-      sincronizarGate();
+      sincronizarProcessamento();
     } catch {
       // Sem Web Audio a mesa continua na faixa crua; só o slider fica sem efeito.
       gainCtxRef.current = null;
       gainNodeRef.current = null;
       destinoRef.current = null;
+      ponteDoSupressorRef.current = null;
       ponteDoGateRef.current = null;
     }
-  }, [publicarFaixaDeAudio, sincronizarGate]);
-
-  /** Volta a publicar a faixa crua e derruba o grafo. */
-  const desmontarGrafoDeAudio = useCallback(() => {
-    if (!gainCtxRef.current && !gainNodeRef.current) return;
-    // Antes do close(): a ponte ainda mexe nas conexões ao se desfazer.
-    ponteDoGateRef.current?.destruir();
-    ponteDoGateRef.current = null;
-    destinoRef.current = null;
-    void gainCtxRef.current?.close().catch(() => undefined);
-    gainCtxRef.current = null;
-    gainNodeRef.current = null;
-    publicarFaixaDeAudio(micRawRef.current);
-  }, [publicarFaixaDeAudio]);
+  }, [desmontarGrafoDeAudio, publicarFaixaDeAudio, sincronizarProcessamento]);
 
   /**
    * Reabre o microfone com as constraints atuais e bota a faixa nova no ar.
@@ -375,11 +423,11 @@ export function useVoiceRoom(
         micStreamRef.current = cru;
         aplicarMudo(cru);
 
-        // O grafo é opcional e só entra se a pessoa tiver mexido no slider ou
-        // ligado o gate. Sem nenhum dos dois, a mesa recebe exatamente a faixa
-        // que o navegador capturou.
+        // O grafo é opcional e só entra se a pessoa tiver mexido no slider,
+        // ligado o gate ou ligado a IA. Sem nenhum dos três, a mesa recebe
+        // exatamente a faixa que o navegador capturou.
         const p = prefsRef.current;
-        if (precisaDeGrafo(p.inputGain, p.noiseGate)) montarGrafoDeAudio();
+        if (precisaDeGrafo(p.inputGain, p.noiseGate, p.noiseSuppressionIA)) montarGrafoDeAudio();
       } catch {
         setError("Não consegui acessar o microfone. Você entrou apenas como ouvinte.");
         micRawRef.current = null;
@@ -468,6 +516,8 @@ export function useVoiceRoom(
       micStreamRef.current = null;
       micRawRef.current?.getTracks().forEach((t) => t.stop());
       micRawRef.current = null;
+      ponteDoSupressorRef.current?.destruir();
+      ponteDoSupressorRef.current = null;
       ponteDoGateRef.current?.destruir();
       ponteDoGateRef.current = null;
       destinoRef.current = null;
@@ -485,17 +535,20 @@ export function useVoiceRoom(
   }, [channelId, userId, createPeer, dropPeer, send, aplicarMudo, montarGrafoDeAudio]);
 
   // ---- controls -----------------------------------------------------------
-  // Mexer no slider ou no gate vale na hora, sem sair e voltar para a mesa.
-  // Slider em 100% com o gate desligado desmonta o grafo e devolve a faixa crua
-  // — é o caminho que soa melhor, e é a saída imediata se o gate atrapalhar.
+  // Mexer no slider, no gate ou na IA vale na hora, sem sair e voltar para a
+  // mesa. Slider em 100% com os dois desligados desmonta o grafo e devolve a
+  // faixa crua — é o caminho que soa melhor, e é a saída imediata se algum dos
+  // dois atrapalhar.
   useEffect(() => {
     if (!micRawRef.current) return;
-    if (precisaDeGrafo(prefs.inputGain, prefs.noiseGate)) montarGrafoDeAudio();
+    if (precisaDeGrafo(prefs.inputGain, prefs.noiseGate, prefs.noiseSuppressionIA))
+      montarGrafoDeAudio();
     else desmontarGrafoDeAudio();
   }, [
     prefs.inputGain,
     prefs.noiseGate,
     prefs.noiseGateThreshold,
+    prefs.noiseSuppressionIA,
     montarGrafoDeAudio,
     desmontarGrafoDeAudio,
   ]);

@@ -48,6 +48,17 @@ export type MediaPrefs = {
    * slider é a posição da linha na barra.
    */
   noiseGateThreshold: number;
+  /**
+   * Supressão de ruído por IA (GTCRN, 2024), num AudioWorklet. Ao contrário do
+   * gate, que só decide passa/não passa, ela separa voz de ruído dentro do
+   * mesmo instante — teclado e saco de salgadinho somem enquanto você fala.
+   *
+   * Nasce DESLIGADA, pelas duas razões de sempre: reativa o caminho por Web
+   * Audio, que já nos custou áudio baixo e eco, e custa CPU de verdade (um
+   * modelo rodando na thread de áudio). Quem liga é quem tem o problema e vai
+   * conferir no A/B do teste de microfone.
+   */
+  noiseSuppressionIA: boolean;
 };
 
 export const MEDIA_PREFS_PADRAO: MediaPrefs = {
@@ -62,6 +73,7 @@ export const MEDIA_PREFS_PADRAO: MediaPrefs = {
   autoGainControl: true,
   noiseGate: false,
   noiseGateThreshold: LIMIAR_PADRAO,
+  noiseSuppressionIA: false,
 };
 
 const CHAVE = "buteco:media-prefs";
@@ -97,6 +109,7 @@ function ler(): MediaPrefs {
       autoGainControl: salvo.autoGainControl ?? MEDIA_PREFS_PADRAO.autoGainControl,
       noiseGate: salvo.noiseGate ?? MEDIA_PREFS_PADRAO.noiseGate,
       noiseGateThreshold: clamp(salvo.noiseGateThreshold ?? LIMIAR_PADRAO, 0, LIMIAR_MAXIMO),
+      noiseSuppressionIA: salvo.noiseSuppressionIA ?? MEDIA_PREFS_PADRAO.noiseSuppressionIA,
     };
   } catch {
     // Janela anônima, storage bloqueado, JSON corrompido: segue no padrão.

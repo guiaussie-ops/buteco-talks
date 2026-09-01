@@ -7,6 +7,7 @@ import {
   Play,
   ShieldAlert,
   SlidersHorizontal,
+  Sparkles,
   Square,
   Volume2,
   Waves,
@@ -14,6 +15,12 @@ import {
 import { useAuth } from "@/lib/auth";
 import { useMediaPrefs, audioConstraints } from "@/lib/mediaPrefs";
 import { LIMIAR_MAXIMO, RMS_CHEIO, ponteDeGate, type PonteDeGate } from "@/lib/gateDeRuido";
+import {
+  TAXA_DO_MODELO,
+  ponteDeSupressor,
+  type EstadoDoSupressor,
+  type PonteDeSupressor,
+} from "@/lib/supressorDeRuido";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -43,6 +50,8 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
   const [listas, setListas] = useState<Listas>(VAZIO);
   const [temRotulos, setTemRotulos] = useState(true);
   const [nivel, setNivel] = useState(0);
+  /** Nível depois da IA, para o A/B: é a barra que tem que encolher. */
+  const [nivelIA, setNivelIA] = useState(0);
   const [erro, setErro] = useState<string | null>(null);
   const [testando, setTestando] = useState(false);
   const [retorno, setRetorno] = useState(true);
@@ -51,6 +60,8 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
   /** O gate está deixando passar agora? Vem do worklet, para a barra mostrar. */
   const [gateAberto, setGateAberto] = useState(true);
   const [semWorklet, setSemWorklet] = useState(false);
+  /** O que a supressão por IA está fazendo agora, para a UI não mentir. */
+  const [estadoIA, setEstadoIA] = useState<EstadoDoSupressor>("desligado");
 
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
@@ -65,6 +76,8 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
   const ganhoRef = useRef<GainNode | null>(null);
   /** Gate de ruído do teste, com o mesmo limiar que vale na mesa. */
   const ponteRef = useRef<PonteDeGate | null>(null);
+  /** Supressão por IA do teste, no mesmo lugar do grafo que vale na mesa. */
+  const ponteIARef = useRef<PonteDeSupressor | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   /** Quando o teste se auto-desliga. */
   const fimRef = useRef(0);
@@ -107,7 +120,9 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
       audioRef.current.pause();
       audioRef.current.srcObject = null;
     }
-    // Antes do close(): a ponte ainda mexe nas conexões ao se desfazer.
+    // Antes do close(): as pontes ainda mexem nas conexões ao se desfazer.
+    ponteIARef.current?.destruir();
+    ponteIARef.current = null;
     ponteRef.current?.destruir();
     ponteRef.current = null;
     ganhoEntradaRef.current = null;
@@ -117,7 +132,9 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
     saturadoDesdeRef.current = 0;
     fimRef.current = 0;
     setGateAberto(true);
+    setEstadoIA("desligado");
     setNivel(0);
+    setNivelIA(0);
     setRestante(0);
     setTestando(false);
   }, []);
@@ -141,7 +158,16 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
         window.AudioContext ??
         (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!AudioCtx) return;
-      const ctx = new AudioCtx();
+      // O teste abre SEMPRE em 48 kHz, que é a taxa do modelo. Assim ligar e
+      // desligar a IA é instantâneo — e comparar A com B só vale se a troca for
+      // no mesmo fôlego. A mesa só força a taxa quando a IA está ligada, mas a
+      // diferença é uma reamostragem: o que a pessoa ouve aqui é o que vai ao ar.
+      let ctx: AudioContext;
+      try {
+        ctx = new AudioCtx({ sampleRate: TAXA_DO_MODELO });
+      } catch {
+        ctx = new AudioCtx();
+      }
       ctxRef.current = ctx;
 
       const source = ctx.createMediaStreamSource(stream);
@@ -158,6 +184,19 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
       source.connect(ganhoEntrada);
       ganhoEntradaRef.current = ganhoEntrada;
 
+      // Emenda entre os dois processadores opcionais, igualzinho à mesa: cada
+      // ponte mexe só no próprio trecho, então ligar um nunca desconecta o outro.
+      const meio = ctx.createGain();
+      ganhoEntrada.connect(meio);
+
+      // Segundo medidor, pendurado na saída da IA. É a barra que tem que
+      // encolher quando você faz barulho sem falar — o A/B, em imagem.
+      const analiseIA = ctx.createAnalyser();
+      analiseIA.fftSize = 512;
+      analiseIA.smoothingTimeConstant = 0.5;
+      meio.connect(analiseIA);
+      const dadosIA = new Uint8Array(analiseIA.frequencyBinCount);
+
       // Retorno: sai por um <audio> em vez de ir direto ao ctx.destination
       // porque só assim dá para respeitar a saída escolhida com setSinkId, do
       // mesmo jeito que o áudio da mesa faz. Começa em zero e sobe na rampa do
@@ -165,13 +204,18 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
       const ganho = ctx.createGain();
       ganho.gain.value = 0;
       const destino = ctx.createMediaStreamDestination();
-      ganhoEntrada.connect(ganho);
+      meio.connect(ganho);
       ganho.connect(destino);
       ganhoRef.current = ganho;
 
-      // O gate entra entre os dois quando estiver ligado. Ele roda mesmo com o
-      // retorno mudo: é dele que vem o aberto/fechado da barra.
-      const ponte = ponteDeGate(ctx, ganhoEntrada, ganho, setGateAberto);
+      // `entrada → [IA] → meio → [gate] → retorno`, a mesma ordem da mesa.
+      const ponteIA = ponteDeSupressor(ctx, ganhoEntrada, meio, setEstadoIA);
+      ponteIARef.current = ponteIA;
+      ponteIA.sincronizar(prefsRef.current.noiseSuppressionIA);
+
+      // O gate roda mesmo com o retorno mudo: é dele que vem o aberto/fechado
+      // da barra.
+      const ponte = ponteDeGate(ctx, meio, ganho, setGateAberto);
       ponteRef.current = ponte;
       ponte.sincronizar(prefsRef.current.noiseGate, prefsRef.current.noiseGateThreshold);
       if (audioRef.current) {
@@ -191,6 +235,15 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
         // O ganho de entrada entra na conta: o medidor mostra o que a mesa vai
         // ouvir, não o que o microfone captou antes do slider.
         setNivel(Math.min(1, (rms * prefsRef.current.inputGain) / RMS_CHEIO));
+
+        // A barra da IA já vem depois do ganho, então não multiplica de novo.
+        analiseIA.getByteTimeDomainData(dadosIA);
+        let somaIA = 0;
+        for (let i = 0; i < dadosIA.length; i++) {
+          const v = (dadosIA[i]! - 128) / 128;
+          somaIA += v * v;
+        }
+        setNivelIA(Math.min(1, Math.sqrt(somaIA / dadosIA.length) / RMS_CHEIO));
 
         // Corta-microfonia: nível colado no teto por tempo contínuo com o
         // retorno ligado é o loop se realimentando, não alguém falando alto.
@@ -256,6 +309,12 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
   useEffect(() => {
     ponteRef.current?.sincronizar(prefs.noiseGate, prefs.noiseGateThreshold);
   }, [prefs.noiseGate, prefs.noiseGateThreshold, testando]);
+
+  // O A/B da IA: ligar e desligar vale no meio do teste, sem reabrir o
+  // microfone e sem cortar o retorno. É assim que dá para comparar de verdade.
+  useEffect(() => {
+    ponteIARef.current?.sincronizar(prefs.noiseSuppressionIA);
+  }, [prefs.noiseSuppressionIA, testando]);
 
   // Navegador sem AudioWorklet: o gate não tem onde rodar. Só dá para saber no
   // cliente, então fica num efeito para não divergir do HTML do servidor.
@@ -351,8 +410,9 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
     aoTrocar: (v: boolean) => void,
     explicacao: string,
     aviso?: string,
+    desabilitado?: boolean,
   ) => (
-    <div className="space-y-1">
+    <div className={cn("space-y-1", desabilitado && "opacity-60")}>
       <div className="flex items-center justify-between gap-3">
         <Label htmlFor={id} className="text-sm font-normal">
           {rotulo}
@@ -360,6 +420,7 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
         <Switch
           id={id}
           checked={valor}
+          disabled={desabilitado}
           onCheckedChange={(v) => {
             renovarTeste();
             aoTrocar(v);
@@ -367,7 +428,7 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
         />
       </div>
       <p className="text-muted-foreground text-xs">{explicacao}</p>
-      {!valor && aviso && (
+      {!valor && !desabilitado && aviso && (
         <p className="text-warning flex items-start gap-1.5 text-xs">
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
           {aviso}
@@ -384,6 +445,9 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
     if (!testando) return "Aperte testar e fala alguma coisa: a barra tem que se mexer.";
     if (microfonia)
       return "Cortei o retorno: isso aí é microfonia. Põe o fone de ouvido e ligue de novo.";
+    if (prefs.noiseSuppressionIA && estadoIA === "carregando") return "Baixando o modelo…";
+    if (prefs.noiseSuppressionIA && estadoIA === "ligado")
+      return "Faz barulho sem falar: a barra de baixo tem que encolher. Falando, as duas sobem junto.";
     if (prefs.noiseGate && !semWorklet)
       return "Fala alguma coisa: a barra tem que passar da linha. Respirando, tem que ficar aquém.";
     return "Fala alguma coisa: a barra tem que se mexer.";
@@ -422,23 +486,40 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
             {testando ? <Square className="size-4" /> : <Play className="size-4" />}
             {testando ? `Parar teste (${restante}s)` : "Testar microfone"}
           </Button>
-          <div className="border-border bg-surface-2 relative h-4 flex-1 overflow-hidden rounded-full border">
-            <div
-              className={cn(
-                "h-full transition-[width] duration-75",
-                // Apagada enquanto o gate segura: dá para ver, sem ouvir nada, o
-                // exato momento em que ele abre e fecha.
-                gateSegurando ? "bg-muted-foreground/40" : "bg-gradient-amber",
-              )}
-              style={{ width: `${Math.round(nivel * 100)}%` }}
-            />
-            {prefs.noiseGate && !semWorklet && (
-              // O limiar, no mesmo eixo do nível: o que não chega até aqui o gate
-              // segura. É por isso que a preferência é guardada nesta escala.
+          <div className="flex-1 space-y-1.5">
+            <div className="border-border bg-surface-2 relative h-4 overflow-hidden rounded-full border">
               <div
-                className="bg-foreground/60 absolute inset-y-0 w-0.5"
-                style={{ left: `${Math.round(prefs.noiseGateThreshold * 100)}%` }}
+                className={cn(
+                  "h-full transition-[width] duration-75",
+                  // Apagada enquanto o gate segura: dá para ver, sem ouvir nada, o
+                  // exato momento em que ele abre e fecha.
+                  gateSegurando ? "bg-muted-foreground/40" : "bg-gradient-amber",
+                )}
+                style={{ width: `${Math.round(nivel * 100)}%` }}
               />
+              {prefs.noiseGate && !semWorklet && (
+                // O limiar, no mesmo eixo do nível: o que não chega até aqui o gate
+                // segura. É por isso que a preferência é guardada nesta escala.
+                <div
+                  className="bg-foreground/60 absolute inset-y-0 w-0.5"
+                  style={{ left: `${Math.round(prefs.noiseGateThreshold * 100)}%` }}
+                />
+              )}
+            </div>
+
+            {/* O A/B em imagem: a mesma voz, depois do modelo, na mesma largura e
+              na mesma escala da barra de cima. Só aparece com a IA ligada
+              porque, desligada, seria a barra de cima repetida. */}
+            {testando && prefs.noiseSuppressionIA && estadoIA === "ligado" && (
+              <div
+                className="border-border bg-surface-2 relative h-4 overflow-hidden rounded-full border"
+                title="depois da IA"
+              >
+                <div
+                  className="bg-neon/70 h-full transition-[width] duration-75"
+                  style={{ width: `${Math.round(nivelIA * 100)}%` }}
+                />
+              </div>
             )}
           </div>
         </div>
@@ -469,6 +550,59 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
               acontecer, eu corto sozinho.
             </p>
           </div>
+        )}
+      </div>
+
+      <div className="border-border space-y-4 border-t pt-5">
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor="ia" className="flex items-center gap-2">
+            <Sparkles className="size-4" /> Supressão de ruído por IA
+          </Label>
+          <Switch
+            id="ia"
+            checked={prefs.noiseSuppressionIA && !semWorklet}
+            disabled={semWorklet}
+            onCheckedChange={(v) => {
+              renovarTeste();
+              // Dois cortadores de ruído em série brigam: o do navegador já
+              // mexeu no sinal quando o modelo o recebe, e o resultado é voz
+              // com buraco. Ligar a IA desliga o do navegador, desligar devolve
+              // — que é o padrão de quem nunca mexeu em nada disto.
+              setPrefs({ noiseSuppressionIA: v, noiseSuppression: !v });
+            }}
+          />
+        </div>
+        <p className="text-muted-foreground -mt-2 text-xs">
+          Um modelo pequeno rodando aqui no seu navegador, que separa a sua voz do resto — teclado,
+          saco de salgadinho, ventilador — inclusive enquanto você fala. Vem desligada: custa CPU e
+          baixa uns 200 KB na primeira vez que você liga.
+        </p>
+
+        {semWorklet ? (
+          <p className="text-warning flex items-start gap-1.5 text-xs">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+            Este navegador não tem AudioWorklet, então o modelo não roda aqui.
+          </p>
+        ) : (
+          prefs.noiseSuppressionIA && (
+            <>
+              {estadoIA === "carregando" && (
+                <p className="text-muted-foreground text-xs">Baixando o modelo…</p>
+              )}
+              {estadoIA === "indisponivel" && (
+                <p className="text-warning flex items-start gap-1.5 text-xs">
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                  Não consegui rodar o modelo neste navegador — pode ser a placa de som numa taxa
+                  que ele não aceita, ou o download que falhou. Seu áudio continua indo inteiro para
+                  a mesa.
+                </p>
+              )}
+              <p className="text-muted-foreground text-xs">
+                Ligue o teste com o retorno e vá ligando e desligando esta chave enquanto faz o seu
+                barulho. A troca é na hora, sem cortar o microfone — é assim que dá para comparar.
+              </p>
+            </>
+          )
         )}
       </div>
 
@@ -536,7 +670,11 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
           "Reduzir ruído de fundo",
           prefs.noiseSuppression,
           (v) => setPrefs({ noiseSuppression: v }),
-          "Segura ventilador, ar-condicionado e chiado constante.",
+          prefs.noiseSuppressionIA
+            ? "Desligado enquanto a supressão por IA está ligada: os dois em série brigam pelo mesmo sinal."
+            : "Segura ventilador, ar-condicionado e chiado constante.",
+          undefined,
+          prefs.noiseSuppressionIA,
         )}
         {interruptor(
           "eco",
