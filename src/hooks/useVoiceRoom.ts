@@ -7,6 +7,7 @@ import {
   MEDIA_PREFS_PADRAO,
   type MediaPrefs,
 } from "@/lib/mediaPrefs";
+import { ponteDeGate, type PonteDeGate } from "@/lib/gateDeRuido";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 export type RemotePeer = {
@@ -48,6 +49,14 @@ type PeerBox = {
 };
 
 /**
+ * Passar o áudio por Web Audio custa: a faixa deixa de ser a que o navegador
+ * capturou. Só vale a pena quando há o que fazer com ela.
+ */
+function precisaDeGrafo(inputGain: number, noiseGate: boolean) {
+  return inputGain !== 1 || noiseGate;
+}
+
+/**
  * WebRTC mesh room. Signaling rides on a Realtime broadcast channel.
  * Presence tells us who is in the room.
  */
@@ -77,6 +86,10 @@ export function useVoiceRoom(
   const micRawRef = useRef<MediaStream | null>(null);
   const gainCtxRef = useRef<AudioContext | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
+  /** Fim do grafo: é o stream dele que vai ao ar enquanto o grafo existir. */
+  const destinoRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  /** Gate de ruído opcional entre o ganho e o destino. */
+  const ponteDoGateRef = useRef<PonteDeGate | null>(null);
   /** Espelho de micOn, para reaplicar o mudo quando a faixa publicada troca. */
   const micOnRef = useRef(true);
 
@@ -126,53 +139,78 @@ export function useVoiceRoom(
   );
 
   /**
-   * Só é montado quando a pessoa mexe no volume de entrada. Enquanto o slider
-   * está em 100% a mesa recebe a faixa crua, sem nenhum processamento nosso.
+   * Põe o gate no estado que as preferências pedem, dentro do grafo que já
+   * existe. A faixa publicada não muda: quem sai do grafo é sempre o mesmo
+   * destino, então ninguém na mesa percebe nada além do áudio mudar.
    */
-  const montarGrafoDeGanho = useCallback(
-    (ganho: number) => {
-      const cru = micRawRef.current;
-      if (!cru) return;
-      if (gainNodeRef.current) {
-        gainNodeRef.current.gain.value = ganho;
-        return;
-      }
-      try {
-        const AudioCtx =
-          window.AudioContext ??
-          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-        if (!AudioCtx) return;
-        const ctx = new AudioCtx();
-        const source = ctx.createMediaStreamSource(cru);
-        const gain = ctx.createGain();
-        gain.gain.value = ganho;
-        const destino = ctx.createMediaStreamDestination();
-        source.connect(gain);
-        gain.connect(destino);
+  const sincronizarGate = useCallback(() => {
+    const { noiseGate, noiseGateThreshold } = prefsRef.current;
+    ponteDoGateRef.current?.sincronizar(noiseGate, noiseGateThreshold);
+  }, []);
 
-        // Fora de um gesto do usuário o contexto nasce suspenso, e contexto
-        // suspenso não gera amostras: silêncio total para a mesa. No iOS ele
-        // também é suspenso ao bloquear a tela e não volta sozinho.
-        void ctx.resume().catch(() => undefined);
-        ctx.onstatechange = () => {
-          if (ctx.state === "suspended") void ctx.resume().catch(() => undefined);
-        };
+  /**
+   * Só é montado quando a pessoa mexe no volume de entrada ou liga o gate.
+   * Enquanto o slider está em 100% e o gate desligado, a mesa recebe a faixa
+   * crua, sem nenhum processamento nosso.
+   *
+   * O grafo é `mic → ganho → [gate] → destino`. O gate fica DEPOIS do ganho de
+   * propósito: assim o limiar vive na mesma escala do medidor do teste, e a
+   * linha do limiar não passeia quando alguém mexe no volume de entrada.
+   */
+  const montarGrafoDeAudio = useCallback(() => {
+    const cru = micRawRef.current;
+    if (!cru) return;
+    const ganho = prefsRef.current.inputGain;
+    if (gainNodeRef.current) {
+      gainNodeRef.current.gain.value = ganho;
+      sincronizarGate();
+      return;
+    }
+    try {
+      const AudioCtx =
+        window.AudioContext ??
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const source = ctx.createMediaStreamSource(cru);
+      const gain = ctx.createGain();
+      gain.gain.value = ganho;
+      const destino = ctx.createMediaStreamDestination();
+      source.connect(gain);
+      gain.connect(destino);
 
-        gainCtxRef.current = ctx;
-        gainNodeRef.current = gain;
-        publicarFaixaDeAudio(destino.stream);
-      } catch {
-        // Sem Web Audio a mesa continua na faixa crua; só o slider fica sem efeito.
-        gainCtxRef.current = null;
-        gainNodeRef.current = null;
-      }
-    },
-    [publicarFaixaDeAudio],
-  );
+      // Fora de um gesto do usuário o contexto nasce suspenso, e contexto
+      // suspenso não gera amostras: silêncio total para a mesa. No iOS ele
+      // também é suspenso ao bloquear a tela e não volta sozinho.
+      void ctx.resume().catch(() => undefined);
+      ctx.onstatechange = () => {
+        if (ctx.state === "suspended") void ctx.resume().catch(() => undefined);
+      };
+
+      gainCtxRef.current = ctx;
+      gainNodeRef.current = gain;
+      destinoRef.current = destino;
+      ponteDoGateRef.current = ponteDeGate(ctx, gain, destino);
+      // A faixa já vai ao ar sem esperar o gate: o gate entra no meio do grafo
+      // depois, e o destino — logo, a faixa publicada — é o mesmo antes e depois.
+      publicarFaixaDeAudio(destino.stream);
+      sincronizarGate();
+    } catch {
+      // Sem Web Audio a mesa continua na faixa crua; só o slider fica sem efeito.
+      gainCtxRef.current = null;
+      gainNodeRef.current = null;
+      destinoRef.current = null;
+      ponteDoGateRef.current = null;
+    }
+  }, [publicarFaixaDeAudio, sincronizarGate]);
 
   /** Volta a publicar a faixa crua e derruba o grafo. */
-  const desmontarGrafoDeGanho = useCallback(() => {
+  const desmontarGrafoDeAudio = useCallback(() => {
     if (!gainCtxRef.current && !gainNodeRef.current) return;
+    // Antes do close(): a ponte ainda mexe nas conexões ao se desfazer.
+    ponteDoGateRef.current?.destruir();
+    ponteDoGateRef.current = null;
+    destinoRef.current = null;
     void gainCtxRef.current?.close().catch(() => undefined);
     gainCtxRef.current = null;
     gainNodeRef.current = null;
@@ -199,13 +237,13 @@ export function useVoiceRoom(
     aplicarMudo(novo);
     // replaceTrack por baixo dos panos: ninguém cai da mesa e não há renegociação.
     if (gainNodeRef.current) {
-      desmontarGrafoDeGanho();
-      montarGrafoDeGanho(prefsRef.current.inputGain);
+      desmontarGrafoDeAudio();
+      montarGrafoDeAudio();
     } else {
       publicarFaixaDeAudio(novo);
     }
     antigo?.getTracks().forEach((t) => t.stop());
-  }, [aplicarMudo, desmontarGrafoDeGanho, montarGrafoDeGanho, publicarFaixaDeAudio]);
+  }, [aplicarMudo, desmontarGrafoDeAudio, montarGrafoDeAudio, publicarFaixaDeAudio]);
 
   const createPeer = useCallback(
     (remoteId: string, polite: boolean) => {
@@ -337,9 +375,11 @@ export function useVoiceRoom(
         micStreamRef.current = cru;
         aplicarMudo(cru);
 
-        // O grafo de ganho é opcional e só entra se a pessoa tiver mexido no
-        // slider. Em 100% a mesa recebe exatamente a faixa do navegador.
-        if (prefsRef.current.inputGain !== 1) montarGrafoDeGanho(prefsRef.current.inputGain);
+        // O grafo é opcional e só entra se a pessoa tiver mexido no slider ou
+        // ligado o gate. Sem nenhum dos dois, a mesa recebe exatamente a faixa
+        // que o navegador capturou.
+        const p = prefsRef.current;
+        if (precisaDeGrafo(p.inputGain, p.noiseGate)) montarGrafoDeAudio();
       } catch {
         setError("Não consegui acessar o microfone. Você entrou apenas como ouvinte.");
         micRawRef.current = null;
@@ -428,6 +468,9 @@ export function useVoiceRoom(
       micStreamRef.current = null;
       micRawRef.current?.getTracks().forEach((t) => t.stop());
       micRawRef.current = null;
+      ponteDoGateRef.current?.destruir();
+      ponteDoGateRef.current = null;
+      destinoRef.current = null;
       void gainCtxRef.current?.close().catch(() => undefined);
       gainCtxRef.current = null;
       gainNodeRef.current = null;
@@ -439,16 +482,23 @@ export function useVoiceRoom(
       if (chanRef.current) void supabase.removeChannel(chanRef.current);
       chanRef.current = null;
     };
-  }, [channelId, userId, createPeer, dropPeer, send, aplicarMudo, montarGrafoDeGanho]);
+  }, [channelId, userId, createPeer, dropPeer, send, aplicarMudo, montarGrafoDeAudio]);
 
   // ---- controls -----------------------------------------------------------
-  // Mexer no slider vale na hora, sem sair e voltar para a mesa. Voltar a 100%
-  // desmonta o grafo e devolve a faixa crua — é o caminho que soa melhor.
+  // Mexer no slider ou no gate vale na hora, sem sair e voltar para a mesa.
+  // Slider em 100% com o gate desligado desmonta o grafo e devolve a faixa crua
+  // — é o caminho que soa melhor, e é a saída imediata se o gate atrapalhar.
   useEffect(() => {
     if (!micRawRef.current) return;
-    if (prefs.inputGain === 1) desmontarGrafoDeGanho();
-    else montarGrafoDeGanho(prefs.inputGain);
-  }, [prefs.inputGain, montarGrafoDeGanho, desmontarGrafoDeGanho]);
+    if (precisaDeGrafo(prefs.inputGain, prefs.noiseGate)) montarGrafoDeAudio();
+    else desmontarGrafoDeAudio();
+  }, [
+    prefs.inputGain,
+    prefs.noiseGate,
+    prefs.noiseGateThreshold,
+    montarGrafoDeAudio,
+    desmontarGrafoDeAudio,
+  ]);
 
   // Filtros do navegador ao vivo. O caminho barato é applyConstraints na faixa
   // já aberta; o Chrome costuma aceitar a chamada sem trocar nada de fato, então

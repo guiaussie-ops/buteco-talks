@@ -9,9 +9,11 @@ import {
   SlidersHorizontal,
   Square,
   Volume2,
+  Waves,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useMediaPrefs, audioConstraints } from "@/lib/mediaPrefs";
+import { LIMIAR_MAXIMO, RMS_CHEIO, ponteDeGate, type PonteDeGate } from "@/lib/gateDeRuido";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -22,9 +24,6 @@ type Dispositivo = { deviceId: string; label: string };
 type Listas = { mics: Dispositivo[]; saidas: Dispositivo[]; cameras: Dispositivo[] };
 
 const VAZIO: Listas = { mics: [], saidas: [], cameras: [] };
-
-/** O medidor satura bem antes do clipping: 0.35 de RMS já é fala alta. */
-const RMS_CHEIO = 0.35;
 
 /**
  * O teste se desliga sozinho. É a garantia de que um microfone aberto nunca
@@ -49,12 +48,23 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
   const [retorno, setRetorno] = useState(true);
   const [microfonia, setMicrofonia] = useState(false);
   const [restante, setRestante] = useState(0);
+  /** O gate está deixando passar agora? Vem do worklet, para a barra mostrar. */
+  const [gateAberto, setGateAberto] = useState(true);
+  const [semWorklet, setSemWorklet] = useState(false);
 
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
   const frameRef = useRef<number>(0);
+  /**
+   * Ganho de entrada do teste. Existe separado do retorno porque o gate precisa
+   * ver o sinal já com o volume de entrada aplicado — é assim que ele funciona
+   * na mesa, e é o que faz o limiar cair na mesma escala do medidor.
+   */
+  const ganhoEntradaRef = useRef<GainNode | null>(null);
   /** Ganho do retorno; mexer nele não reabre a captura. */
   const ganhoRef = useRef<GainNode | null>(null);
+  /** Gate de ruído do teste, com o mesmo limiar que vale na mesa. */
+  const ponteRef = useRef<PonteDeGate | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   /** Quando o teste se auto-desliga. */
   const fimRef = useRef(0);
@@ -97,11 +107,16 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
       audioRef.current.pause();
       audioRef.current.srcObject = null;
     }
+    // Antes do close(): a ponte ainda mexe nas conexões ao se desfazer.
+    ponteRef.current?.destruir();
+    ponteRef.current = null;
+    ganhoEntradaRef.current = null;
     ganhoRef.current = null;
     void ctxRef.current?.close();
     ctxRef.current = null;
     saturadoDesdeRef.current = 0;
     fimRef.current = 0;
+    setGateAberto(true);
     setNivel(0);
     setRestante(0);
     setTestando(false);
@@ -136,6 +151,13 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
       source.connect(analyser);
       const dados = new Uint8Array(analyser.frequencyBinCount);
 
+      // O caminho do retorno é o mesmo da mesa: entrada → ganho → [gate] →
+      // saída. Calibrar num grafo diferente do que vai ao ar não calibraria nada.
+      const ganhoEntrada = ctx.createGain();
+      ganhoEntrada.gain.value = prefsRef.current.inputGain;
+      source.connect(ganhoEntrada);
+      ganhoEntradaRef.current = ganhoEntrada;
+
       // Retorno: sai por um <audio> em vez de ir direto ao ctx.destination
       // porque só assim dá para respeitar a saída escolhida com setSinkId, do
       // mesmo jeito que o áudio da mesa faz. Começa em zero e sobe na rampa do
@@ -143,9 +165,15 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
       const ganho = ctx.createGain();
       ganho.gain.value = 0;
       const destino = ctx.createMediaStreamDestination();
-      source.connect(ganho);
+      ganhoEntrada.connect(ganho);
       ganho.connect(destino);
       ganhoRef.current = ganho;
+
+      // O gate entra entre os dois quando estiver ligado. Ele roda mesmo com o
+      // retorno mudo: é dele que vem o aberto/fechado da barra.
+      const ponte = ponteDeGate(ctx, ganhoEntrada, ganho, setGateAberto);
+      ponteRef.current = ponte;
+      ponte.sincronizar(prefsRef.current.noiseGate, prefsRef.current.noiseGateThreshold);
       if (audioRef.current) {
         audioRef.current.srcObject = destino.stream;
         void audioRef.current.play().catch(() => undefined);
@@ -213,13 +241,27 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
   }, [testando, pararTeste]);
 
   // Volume do retorno, ao vivo. Rampa curta em vez de salto evita o estalo.
+  // O volume de entrada entra antes do gate; o de saída, depois — os dois sem
+  // reabrir a captura.
   useEffect(() => {
-    const ganho = ganhoRef.current;
     const ctx = ctxRef.current;
-    if (!ganho || !ctx) return;
-    const alvo = retorno && !microfonia ? prefs.inputGain * prefs.outputVolume : 0;
-    ganho.gain.setTargetAtTime(alvo, ctx.currentTime, 0.02);
+    if (!ctx) return;
+    ganhoEntradaRef.current?.gain.setTargetAtTime(prefs.inputGain, ctx.currentTime, 0.02);
+    const alvo = retorno && !microfonia ? prefs.outputVolume : 0;
+    ganhoRef.current?.gain.setTargetAtTime(alvo, ctx.currentTime, 0.02);
   }, [retorno, microfonia, prefs.inputGain, prefs.outputVolume, testando]);
+
+  // Ligar, desligar e arrastar o limiar valem no meio do teste — é para isso que
+  // a calibração serve. Desligar volta ao caminho sem gate na hora.
+  useEffect(() => {
+    ponteRef.current?.sincronizar(prefs.noiseGate, prefs.noiseGateThreshold);
+  }, [prefs.noiseGate, prefs.noiseGateThreshold, testando]);
+
+  // Navegador sem AudioWorklet: o gate não tem onde rodar. Só dá para saber no
+  // cliente, então fica num efeito para não divergir do HTML do servidor.
+  useEffect(() => {
+    setSemWorklet(typeof window.AudioWorkletNode === "undefined");
+  }, []);
 
   // Saída escolhida para o retorno. setSinkId não existe em todo navegador;
   // sem ele o retorno sai no aparelho padrão — degrada, não quebra.
@@ -334,11 +376,16 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
     </div>
   );
 
+  /** Com o gate ligado e segurando o som, a barra é desenhada apagada. */
+  const gateSegurando = testando && prefs.noiseGate && !semWorklet && !gateAberto;
+
   const dica = () => {
     if (erro) return erro;
     if (!testando) return "Aperte testar e fala alguma coisa: a barra tem que se mexer.";
     if (microfonia)
       return "Cortei o retorno: isso aí é microfonia. Põe o fone de ouvido e ligue de novo.";
+    if (prefs.noiseGate && !semWorklet)
+      return "Fala alguma coisa: a barra tem que passar da linha. Respirando, tem que ficar aquém.";
     return "Fala alguma coisa: a barra tem que se mexer.";
   };
 
@@ -375,11 +422,24 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
             {testando ? <Square className="size-4" /> : <Play className="size-4" />}
             {testando ? `Parar teste (${restante}s)` : "Testar microfone"}
           </Button>
-          <div className="border-border bg-surface-2 h-4 flex-1 overflow-hidden rounded-full border">
+          <div className="border-border bg-surface-2 relative h-4 flex-1 overflow-hidden rounded-full border">
             <div
-              className="bg-gradient-amber h-full transition-[width] duration-75"
+              className={cn(
+                "h-full transition-[width] duration-75",
+                // Apagada enquanto o gate segura: dá para ver, sem ouvir nada, o
+                // exato momento em que ele abre e fecha.
+                gateSegurando ? "bg-muted-foreground/40" : "bg-gradient-amber",
+              )}
               style={{ width: `${Math.round(nivel * 100)}%` }}
             />
+            {prefs.noiseGate && !semWorklet && (
+              // O limiar, no mesmo eixo do nível: o que não chega até aqui o gate
+              // segura. É por isso que a preferência é guardada nesta escala.
+              <div
+                className="bg-foreground/60 absolute inset-y-0 w-0.5"
+                style={{ left: `${Math.round(prefs.noiseGateThreshold * 100)}%` }}
+              />
+            )}
           </div>
         </div>
 
@@ -409,6 +469,57 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
               acontecer, eu corto sozinho.
             </p>
           </div>
+        )}
+      </div>
+
+      <div className="border-border space-y-4 border-t pt-5">
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor="gate" className="flex items-center gap-2">
+            <Waves className="size-4" /> Gate de ruído
+          </Label>
+          <Switch
+            id="gate"
+            checked={prefs.noiseGate && !semWorklet}
+            disabled={semWorklet}
+            onCheckedChange={(v) => {
+              renovarTeste();
+              setPrefs({ noiseGate: v });
+            }}
+          />
+        </div>
+        <p className="text-muted-foreground -mt-2 text-xs">
+          Segura o que está abaixo do limiar — respiração, saco de salgadinho, tecladinho — e deixa
+          a voz passar. Vem desligado: ligue se a mesa reclamar do seu barulho de fundo.
+        </p>
+
+        {semWorklet ? (
+          <p className="text-warning flex items-start gap-1.5 text-xs">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+            Este navegador não tem AudioWorklet, então o gate não roda aqui. Seu áudio continua indo
+            inteiro para a mesa.
+          </p>
+        ) : (
+          prefs.noiseGate && (
+            <div className="space-y-2">
+              <Label htmlFor="sensibilidade">Sensibilidade</Label>
+              <Slider
+                id="sensibilidade"
+                min={0}
+                max={Math.round(LIMIAR_MAXIMO * 100)}
+                step={1}
+                value={[Math.round(prefs.noiseGateThreshold * 100)]}
+                onValueChange={([v]) => {
+                  renovarTeste();
+                  setPrefs({ noiseGateThreshold: (v ?? 6) / 100 });
+                }}
+              />
+              <p className="text-muted-foreground text-xs">
+                A linha no medidor lá em cima é este limiar. Ligue o teste com o retorno e arraste
+                até a barra passar da linha quando você fala e ficar aquém quando você só respira.
+                Mais para a direita corta mais — e come mais voz baixinha.
+              </p>
+            </div>
+          )
         )}
       </div>
 

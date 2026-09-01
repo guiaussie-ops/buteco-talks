@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { LIMIAR_MAXIMO, LIMIAR_PADRAO } from "@/lib/gateDeRuido";
 
 export type MediaPrefs = {
   /** null = deixa o navegador escolher */
@@ -33,6 +34,20 @@ export type MediaPrefs = {
   echoCancellation: boolean;
   noiseSuppression: boolean;
   autoGainControl: boolean;
+  /**
+   * Gate de ruído nosso, num AudioWorklet: corta o que está abaixo do limiar
+   * (respiração, saco de salgadinho, tecladinho) e deixa a voz passar.
+   *
+   * Nasce DESLIGADO. Ligar reativa o caminho por Web Audio, que já nos custou
+   * áudio baixo e eco — desligar volta à faixa crua na hora. Quem liga é quem
+   * tem o problema e vai calibrar ouvindo no teste de microfone.
+   */
+  noiseGate: boolean;
+  /**
+   * Limiar do gate na MESMA escala do medidor do teste (0 a 1): a posição do
+   * slider é a posição da linha na barra.
+   */
+  noiseGateThreshold: number;
 };
 
 export const MEDIA_PREFS_PADRAO: MediaPrefs = {
@@ -45,6 +60,8 @@ export const MEDIA_PREFS_PADRAO: MediaPrefs = {
   echoCancellation: false,
   noiseSuppression: true,
   autoGainControl: true,
+  noiseGate: false,
+  noiseGateThreshold: LIMIAR_PADRAO,
 };
 
 const CHAVE = "buteco:media-prefs";
@@ -78,6 +95,8 @@ function ler(): MediaPrefs {
       echoCancellation: salvo.echoCancellation ?? MEDIA_PREFS_PADRAO.echoCancellation,
       noiseSuppression: salvo.noiseSuppression ?? MEDIA_PREFS_PADRAO.noiseSuppression,
       autoGainControl: salvo.autoGainControl ?? MEDIA_PREFS_PADRAO.autoGainControl,
+      noiseGate: salvo.noiseGate ?? MEDIA_PREFS_PADRAO.noiseGate,
+      noiseGateThreshold: clamp(salvo.noiseGateThreshold ?? LIMIAR_PADRAO, 0, LIMIAR_MAXIMO),
     };
   } catch {
     // Janela anônima, storage bloqueado, JSON corrompido: segue no padrão.
