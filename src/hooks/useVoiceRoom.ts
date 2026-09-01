@@ -36,7 +36,15 @@ type PeerBox = {
   makingOffer: boolean;
   ignoreOffer: boolean;
   audioSender: RTCRtpSender | null;
+  /**
+   * Criado junto com o peer e nunca trocado: transmitir vira replaceTrack, e
+   * parar vira replaceTrack(null). Sem addTrack/removeTrack não há renegociação
+   * ao começar ou parar de transmitir — e sem renegociação não há a colisão de
+   * ofertas que deixava uma de duas transmissões simultâneas na tela preta.
+   */
   videoSender: RTCRtpSender | null;
+  /** Negociação que falhou por estado instável e precisa ser refeita. */
+  renegociarPendente: boolean;
 };
 
 /**
@@ -82,7 +90,11 @@ export function useVoiceRoom(
       Array.from(remoteStreamsRef.current.entries()).map(([id, stream]) => ({
         userId: id,
         stream,
-        hasVideo: stream.getVideoTracks().some((t) => t.readyState === "live"),
+        // `muted` é o que separa uma transmissão viva de uma que o outro lado
+        // já encerrou: removeTrack/replaceTrack(null) deixam a faixa remota
+        // muda, mas com readyState ainda em "live". Olhar só o readyState era o
+        // que mantinha o último quadro congelado na tela.
+        hasVideo: stream.getVideoTracks().some((t) => !t.muted && t.readyState === "live"),
       })),
     );
   }, []);
@@ -208,6 +220,7 @@ export function useVoiceRoom(
         ignoreOffer: false,
         audioSender: null,
         videoSender: null,
+        renegociarPendente: false,
       };
       peersRef.current.set(remoteId, box);
 
@@ -215,9 +228,21 @@ export function useVoiceRoom(
       if (aTrack && micStreamRef.current) {
         box.audioSender = pc.addTrack(aTrack, micStreamRef.current);
       }
-      const vTrack = videoStreamRef.current?.getVideoTracks()[0];
-      if (vTrack && videoStreamRef.current) {
-        box.videoSender = pc.addTrack(vTrack, videoStreamRef.current);
+      // O transceiver de vídeo nasce com o peer, mesmo sem ninguém transmitindo:
+      // é o que permite começar e parar depois sem renegociar nada. Se já
+      // houver transmissão em curso, ele já nasce com a faixa.
+      const vTrack = videoStreamRef.current?.getVideoTracks()[0] ?? null;
+      try {
+        const transceiver = pc.addTransceiver(vTrack ?? "video", {
+          direction: "sendonly",
+          ...(videoStreamRef.current ? { streams: [videoStreamRef.current] } : {}),
+        });
+        box.videoSender = transceiver.sender;
+      } catch {
+        // Navegador sem addTransceiver: cai no caminho antigo, que renegocia.
+        if (vTrack && videoStreamRef.current) {
+          box.videoSender = pc.addTrack(vTrack, videoStreamRef.current);
+        }
       }
 
       pc.onicecandidate = (e) => {
@@ -225,18 +250,29 @@ export function useVoiceRoom(
           send({ from: userId, to: remoteId, candidate: e.candidate.toJSON() });
       };
 
-      pc.onnegotiationneeded = async () => {
+      const negociar = async () => {
         if (!userId) return;
         try {
           box.makingOffer = true;
           await pc.setLocalDescription();
           if (pc.localDescription)
             send({ from: userId, to: remoteId, description: pc.localDescription.toJSON() });
+          box.renegociarPendente = false;
         } catch {
-          /* ignore */
+          // Estado instável no meio de uma colisão de ofertas. Guardar para
+          // refazer quando estabilizar; engolir aqui era o que deixava a linha
+          // de vídeo sem negociar para sempre — a tela preta com dois
+          // transmitindo ao mesmo tempo.
+          box.renegociarPendente = true;
         } finally {
           box.makingOffer = false;
         }
+      };
+
+      pc.onnegotiationneeded = () => void negociar();
+
+      pc.onsignalingstatechange = () => {
+        if (pc.signalingState === "stable" && box.renegociarPendente) void negociar();
       };
 
       pc.ontrack = (e) => {
@@ -244,6 +280,14 @@ export function useVoiceRoom(
         if (!stream) {
           stream = new MediaStream();
           remoteStreamsRef.current.set(remoteId, stream);
+        }
+        // Uma faixa de vídeo por pessoa. Sem isso, quem parava e voltava a
+        // transmitir deixava a faixa morta no stream, e o <video> renderiza a
+        // primeira — a congelada — em vez da nova.
+        if (e.track.kind === "video") {
+          stream.getVideoTracks().forEach((t) => {
+            if (t.id !== e.track.id) stream!.removeTrack(t);
+          });
         }
         if (!stream.getTracks().some((t) => t.id === e.track.id)) stream.addTrack(e.track);
         e.track.onended = () => {
@@ -316,8 +360,10 @@ export function useVoiceRoom(
           if (!peersRef.current.has(id)) {
             // deterministic roles: lower id is the impolite initiator
             const initiator = userId < id;
-            const box = createPeer(id, !initiator);
-            if (initiator) void box.pc.createOffer().then(() => undefined);
+            // O transceiver criado dentro de createPeer já dispara
+            // onnegotiationneeded em quem inicia; um createOffer solto aqui não
+            // mandava nada e só confundia.
+            createPeer(id, !initiator);
           }
         });
         Array.from(peersRef.current.keys()).forEach((id) => {
@@ -446,15 +492,11 @@ export function useVoiceRoom(
     videoStreamRef.current = null;
     setLocalVideoStream(null);
     setVideoMode("none");
+    // replaceTrack(null) e não removeTrack: o sender continua de pé, ninguém
+    // renegocia, e do outro lado a faixa fica muda na hora — que é o sinal que
+    // o publish() agora lê para tirar o tile da tela.
     peersRef.current.forEach((box) => {
-      if (box.videoSender) {
-        try {
-          box.pc.removeTrack(box.videoSender);
-        } catch {
-          /* ignore */
-        }
-        box.videoSender = null;
-      }
+      void box.videoSender?.replaceTrack(null).catch(() => undefined);
     });
   }, []);
 
@@ -481,7 +523,9 @@ export function useVoiceRoom(
         if (track) {
           track.onended = () => stopVideo();
           peersRef.current.forEach((box) => {
-            if (box.videoSender) box.videoSender.replaceTrack(track);
+            if (box.videoSender) void box.videoSender.replaceTrack(track).catch(() => undefined);
+            // Só cai aqui num navegador sem addTransceiver, onde o sender não
+            // pôde nascer junto com o peer.
             else box.videoSender = box.pc.addTrack(track, stream);
           });
         }
