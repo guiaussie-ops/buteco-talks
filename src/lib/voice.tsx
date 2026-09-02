@@ -27,6 +27,8 @@ type VoiceContextValue = {
   videoMode: "none" | "camera" | "screen";
   localVideoStream: MediaStream | null;
   remotePeers: RemotePeer[];
+  /** Todo mundo na mesa, você incluído — inclusive quem entrou só de ouvinte. */
+  participants: string[];
   speaking: Record<string, boolean>;
   participantCount: number;
   /** volume individual de cada participante (0 a 1, 1 = sem atenuar) */
@@ -294,6 +296,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       videoMode: room.videoMode,
       localVideoStream: room.localVideoStream,
       remotePeers: room.remotePeers,
+      participants: room.participants,
       speaking,
       participantCount: room.participantCount,
       peerVolumes: prefs.peerVolumes,

@@ -75,6 +75,13 @@ export function useVoiceRoom(
   const [micOn, setMicOn] = useState(true);
   const [micStream, setMicStreamState] = useState<MediaStream | null>(null);
   const [remotePeers, setRemotePeers] = useState<RemotePeer[]>([]);
+  /**
+   * Todo mundo que está na mesa, você inclusive — inclusive quem entrou sem
+   * microfone. Vem da presença do Realtime, a MESMA que decide quem entra e
+   * quem sai. Derivar isto de `remotePeers` era o que fazia o ouvinte sumir:
+   * sem mídia não há `ontrack`, e sem `ontrack` a pessoa não existia na tela.
+   */
+  const [participants, setParticipants] = useState<string[]>([]);
   const [localVideoStream, setLocalVideoStream] = useState<MediaStream | null>(null);
   const [videoMode, setVideoMode] = useState<"none" | "camera" | "screen">("none");
   const [error, setError] = useState<string | null>(null);
@@ -443,7 +450,12 @@ export function useVoiceRoom(
 
       chan.on("presence", { event: "sync" }, () => {
         const state = chan.presenceState();
-        const ids = Object.keys(state).filter((id) => id !== userId);
+        const todos = Object.keys(state);
+        // Você primeiro, sempre: a ordem das chaves da presença é a ordem em que
+        // as pessoas chegaram, e ver a própria tampinha pulando de lugar quando
+        // alguém entra é estranho.
+        setParticipants([userId, ...todos.filter((id) => id !== userId)]);
+        const ids = todos.filter((id) => id !== userId);
         ids.forEach((id) => {
           if (!peersRef.current.has(id)) {
             // deterministic roles: lower id is the impolite initiator
@@ -509,6 +521,7 @@ export function useVoiceRoom(
       peersRef.current.clear();
       remoteStreamsRef.current.clear();
       setRemotePeers([]);
+      setParticipants([]);
       // Com o grafo montado a faixa publicada é outra que não a crua; parar só
       // uma das duas deixaria o microfone aberto. Parar as duas é seguro porque
       // stop() numa faixa já parada não faz nada.
@@ -654,6 +667,9 @@ export function useVoiceRoom(
     startVideo,
     stopVideo,
     error,
-    participantCount: remotePeers.length + 1,
+    participants,
+    // O `|| 1` cobre a janela entre entrar e a primeira sincronização da
+    // presença chegar: nesse instante você já está na mesa, só ainda não se viu.
+    participantCount: participants.length || 1,
   };
 }

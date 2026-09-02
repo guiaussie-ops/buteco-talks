@@ -133,6 +133,13 @@ export function VoicePanel({
   const [spotlight, ...rest] = tiles;
   const selfName = names[userId] ?? "Você";
 
+  /**
+   * Quem está na mesa vem da presença, não de quem mandou mídia: é o que faz o
+   * ouvinte sem microfone aparecer e ser contado. O `[userId]` é a rede de
+   * segurança do instante entre entrar e a presença sincronizar.
+   */
+  const naMesa = voice.participants.length > 0 ? voice.participants : [userId];
+
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col">
       <header className="border-border flex h-14 shrink-0 items-center gap-2 border-b px-5">
@@ -192,26 +199,30 @@ export function VoicePanel({
               Na mesa agora
             </p>
             <div className="flex flex-wrap gap-4">
-              <div className="flex w-16 flex-col items-center gap-1.5">
-                <Bottlecap
-                  name={selfName}
-                  src={avatars[userId]}
-                  speaking={!!voice.speaking[userId]}
-                  className="size-12"
-                />
-                <span className="text-muted-foreground max-w-full truncate text-[11px]">
-                  {selfName}
-                </span>
-              </div>
-              {voice.remotePeers.map((p) => (
-                <PeerCap
-                  key={p.userId}
-                  userId={p.userId}
-                  name={names[p.userId] ?? "Participante"}
-                  src={avatars[p.userId]}
-                  speaking={!!voice.speaking[p.userId]}
-                />
-              ))}
+              {naMesa.map((id) =>
+                id === userId ? (
+                  // Você não tem controle de volume da própria voz.
+                  <div key={id} className="flex w-16 flex-col items-center gap-1.5">
+                    <Bottlecap
+                      name={selfName}
+                      src={avatars[userId]}
+                      speaking={!!voice.speaking[userId]}
+                      className="size-12"
+                    />
+                    <span className="text-muted-foreground max-w-full truncate text-[11px]">
+                      {selfName}
+                    </span>
+                  </div>
+                ) : (
+                  <PeerCap
+                    key={id}
+                    userId={id}
+                    name={names[id] ?? "Participante"}
+                    src={avatars[id]}
+                    speaking={!!voice.speaking[id]}
+                  />
+                ),
+              )}
             </div>
           </div>
         )}
