@@ -11,7 +11,7 @@ import {
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { useVoiceRoom, type RemotePeer } from "@/hooks/useVoiceRoom";
+import { useVoiceRoom, type RemotePeer, type Transmissao } from "@/hooks/useVoiceRoom";
 import { useMediaPrefs } from "@/lib/mediaPrefs";
 import { useSpeaking } from "@/hooks/useSpeaking";
 import { HEARTBEAT_MS, saidaComKeepalive } from "@/lib/voicePresence";
@@ -29,6 +29,12 @@ type VoiceContextValue = {
   remotePeers: RemotePeer[];
   /** Todo mundo na mesa, você incluído — inclusive quem entrou só de ouvinte. */
   participants: string[];
+  /** Quem está transmitindo agora, e o quê. Estar aqui não faz nada carregar. */
+  transmissoes: Record<string, Transmissao>;
+  /** De quem você pediu para receber vídeo. */
+  assistindo: string[];
+  assistir: (userId: string) => void;
+  pararDeAssistir: (userId: string) => void;
   speaking: Record<string, boolean>;
   participantCount: number;
   /** volume individual de cada participante (0 a 1, 1 = sem atenuar) */
@@ -297,6 +303,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       localVideoStream: room.localVideoStream,
       remotePeers: room.remotePeers,
       participants: room.participants,
+      transmissoes: room.transmissoes,
+      assistindo: room.assistindo,
+      assistir: room.assistir,
+      pararDeAssistir: room.pararDeAssistir,
       speaking,
       participantCount: room.participantCount,
       peerVolumes: prefs.peerVolumes,

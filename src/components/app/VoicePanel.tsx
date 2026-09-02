@@ -1,5 +1,8 @@
 import { useEffect, useRef } from "react";
 import {
+  Eye,
+  EyeOff,
+  Loader2,
   Mic,
   MicOff,
   MonitorUp,
@@ -35,11 +38,14 @@ function VideoTile({
   label,
   muted,
   main,
+  onParar,
 }: {
   stream: MediaStream;
   label: string;
   muted?: boolean | undefined;
   main?: boolean | undefined;
+  /** Só nas transmissões dos outros: fechar devolve a banda na hora. */
+  onParar?: (() => void) | undefined;
 }) {
   const ref = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
@@ -62,6 +68,62 @@ function VideoTile({
       <span className="bg-background/85 absolute bottom-2 left-2 rounded-md px-2 py-0.5 text-xs font-medium">
         {label}
       </span>
+      {onParar && (
+        <Button
+          size="sm"
+          variant="secondary"
+          className="bg-background/85 hover:bg-background absolute top-2 right-2 h-7 px-2 text-xs"
+          onClick={onParar}
+        >
+          <EyeOff className="size-3.5" /> Parar de assistir
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Convite de transmissão: alguém está mostrando alguma coisa, e você decide se
+ * quer ver. Enquanto você não clica, nenhum pacote de vídeo daquela pessoa
+ * chega até aqui — o sender do outro lado está com a faixa em `null`.
+ */
+function ConviteDeTransmissao({
+  nome,
+  src,
+  modo,
+  pedido,
+  onAssistir,
+}: {
+  nome: string;
+  src?: string | null | undefined;
+  modo: "camera" | "screen";
+  /** Já pedi e estou esperando a faixa chegar. */
+  pedido: boolean;
+  onAssistir: () => void;
+}) {
+  return (
+    <div className="border-primary/40 bg-surface-2 flex items-center gap-3 rounded-xl border p-3">
+      <Bottlecap name={nome} src={src} className="size-10" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm">
+          <strong className="font-display tracking-wide">{nome}</strong>{" "}
+          {modo === "screen" ? "está mostrando a tela" : "está com a câmera ligada"}
+        </p>
+        <p className="text-muted-foreground text-xs">
+          {pedido
+            ? "Abrindo a transmissão…"
+            : "Só carrega se você pedir — sem clicar, não gasta a sua banda."}
+        </p>
+      </div>
+      {pedido ? (
+        <Button size="sm" variant="secondary" disabled>
+          <Loader2 className="size-4 animate-spin" /> Abrindo
+        </Button>
+      ) : (
+        <Button size="sm" onClick={onAssistir}>
+          <Eye className="size-4" /> Assistir
+        </Button>
+      )}
     </div>
   );
 }
@@ -116,8 +178,16 @@ export function VoicePanel({
   const voice = useVoice();
   const viewingActiveRoom = voice.active?.channelId === channelId;
 
+  // Só chega aqui a transmissão de quem você pediu para assistir: quem não foi
+  // pedido está com a faixa em `null` do outro lado e nem tem o que renderizar.
   const videoPeers = voice.remotePeers.filter((p) => p.hasVideo);
-  const tiles: { id: string; stream: MediaStream; label: string; muted?: boolean }[] = [];
+  const tiles: {
+    id: string;
+    stream: MediaStream;
+    label: string;
+    muted?: boolean;
+    onParar?: () => void;
+  }[] = [];
   if (voice.localVideoStream) {
     tiles.push({
       id: "local",
@@ -127,8 +197,25 @@ export function VoicePanel({
     });
   }
   videoPeers.forEach((p) =>
-    tiles.push({ id: p.userId, stream: p.stream, label: names[p.userId] ?? "Participante" }),
+    tiles.push({
+      id: p.userId,
+      stream: p.stream,
+      label: names[p.userId] ?? "Participante",
+      onParar: () => voice.pararDeAssistir(p.userId),
+    }),
   );
+
+  /**
+   * Transmissões que existem mas que você ainda não está vendo: as que você não
+   * pediu, e as que você acabou de pedir e ainda não chegaram. Cada uma é
+   * independente, então várias pessoas podem transmitir ao mesmo tempo.
+   */
+  const chegou = new Set(videoPeers.map((p) => p.userId));
+  const convites = viewingActiveRoom
+    ? Object.entries(voice.transmissoes)
+        .filter(([id]) => !chegou.has(id))
+        .map(([id, modo]) => ({ id, modo, pedido: voice.assistindo.includes(id) }))
+    : [];
 
   const [spotlight, ...rest] = tiles;
   const selfName = names[userId] ?? "Você";
@@ -165,6 +252,21 @@ export function VoicePanel({
           </div>
         )}
 
+        {convites.length > 0 && (
+          <div className="mb-5 space-y-2">
+            {convites.map((c) => (
+              <ConviteDeTransmissao
+                key={c.id}
+                nome={names[c.id] ?? "Participante"}
+                src={avatars[c.id]}
+                modo={c.modo}
+                pedido={c.pedido}
+                onAssistir={() => voice.assistir(c.id)}
+              />
+            ))}
+          </div>
+        )}
+
         {viewingActiveRoom && spotlight ? (
           <div className="space-y-3">
             {/* tela em destaque — quem tá mostrando o gameplay */}
@@ -172,24 +274,33 @@ export function VoicePanel({
               stream={spotlight.stream}
               label={spotlight.label}
               muted={spotlight.muted}
+              onParar={spotlight.onParar}
               main
             />
             {rest.length > 0 && (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {rest.map((t) => (
-                  <VideoTile key={t.id} stream={t.stream} label={t.label} muted={t.muted} />
+                  <VideoTile
+                    key={t.id}
+                    stream={t.stream}
+                    label={t.label}
+                    muted={t.muted}
+                    onParar={t.onParar}
+                  />
                 ))}
               </div>
             )}
           </div>
         ) : (
-          <div className="text-muted-foreground flex h-full min-h-60 flex-col items-center justify-center gap-3 text-center">
-            <MonitorUp className="text-primary size-9 opacity-50" />
-            <p className="max-w-xs text-sm">
-              Mesa de voz aberta. Chega mais, puxa a cadeira!
-              {isAdult ? " Quando quiser, mostre sua tela pra turma." : ""}
-            </p>
-          </div>
+          convites.length === 0 && (
+            <div className="text-muted-foreground flex h-full min-h-60 flex-col items-center justify-center gap-3 text-center">
+              <MonitorUp className="text-primary size-9 opacity-50" />
+              <p className="max-w-xs text-sm">
+                Mesa de voz aberta. Chega mais, puxa a cadeira!
+                {isAdult ? " Quando quiser, mostre sua tela pra turma." : ""}
+              </p>
+            </div>
+          )
         )}
 
         {/* tampinhas de quem está na mesa, com anel de neon quando fala */}

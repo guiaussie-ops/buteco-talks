@@ -22,6 +22,28 @@ export type RemotePeer = {
   hasVideo: boolean;
 };
 
+/** O que alguém pode estar transmitindo. */
+export type Transmissao = "camera" | "screen";
+
+/**
+ * O que cada um publica na presença da mesa.
+ *
+ * `video` e `assistindo` são o que faz a transmissão ser opcional: quem
+ * transmite lê os `assistindo` de todo mundo para saber para quem mandar a
+ * faixa, e manda `null` para o resto.
+ *
+ * Isto vive na PRESENÇA e não no canal de sinalização de propósito. Um pedido
+ * de "quero assistir" perdido num broadcast deixaria a pessoa esperando para
+ * sempre por um vídeo que nunca vem. Presença é estado: sincroniza sozinha,
+ * sobrevive a reconexão e pode ser reaplicada quantas vezes for.
+ */
+type PresencaDeVoz = {
+  userId: string;
+  at: number;
+  video: "none" | Transmissao;
+  assistindo: string[];
+};
+
 type SignalPayload = {
   from: string;
   to: string;
@@ -50,6 +72,12 @@ type PeerBox = {
    * ofertas que deixava uma de duas transmissões simultâneas na tela preta.
    */
   videoSender: RTCRtpSender | null;
+  /**
+   * Faixa de vídeo que este peer está recebendo agora — `null` quando ele não
+   * pediu para assistir. Guardado para não chamar `replaceTrack` de novo a cada
+   * sincronização de presença com o mesmo valor.
+   */
+  videoAtual: MediaStreamTrack | null;
   /** Negociação que falhou por estado instável e precisa ser refeita. */
   renegociarPendente: boolean;
 };
@@ -82,6 +110,10 @@ export function useVoiceRoom(
    * sem mídia não há `ontrack`, e sem `ontrack` a pessoa não existia na tela.
    */
   const [participants, setParticipants] = useState<string[]>([]);
+  /** Quem está transmitindo agora, e o quê. Não implica receber nada. */
+  const [transmissoes, setTransmissoes] = useState<Record<string, Transmissao>>({});
+  /** De quem EU pedi para receber vídeo. Nasce vazio: ninguém carrega sem pedir. */
+  const [assistindo, setAssistindo] = useState<string[]>([]);
   const [localVideoStream, setLocalVideoStream] = useState<MediaStream | null>(null);
   const [videoMode, setVideoMode] = useState<"none" | "camera" | "screen">("none");
   const [error, setError] = useState<string | null>(null);
@@ -113,6 +145,17 @@ export function useVoiceRoom(
   const ctxPedidoParaIaRef = useRef(false);
   /** Espelho de micOn, para reaplicar o mudo quando a faixa publicada troca. */
   const micOnRef = useRef(true);
+  /**
+   * Quem pediu para assistir a MINHA transmissão, lido da presença dos outros.
+   * É a lista que decide para quais peers a faixa de vídeo vai.
+   */
+  const quemQuerMeuVideoRef = useRef<Set<string>>(new Set());
+  /** Espelhos para a presença ser republicada sem virar dependência de efeito. */
+  const assistindoRef = useRef<string[]>([]);
+  assistindoRef.current = assistindo;
+  const videoModeRef = useRef<"none" | Transmissao>("none");
+  /** Instante da entrada. Fixo, para republicar a presença não virar um diff. */
+  const entradaRef = useRef(0);
 
   // As prefs entram por ref: mudar o volume não pode reconectar a mesa inteira.
   const prefsRef = useRef(prefs);
@@ -135,6 +178,58 @@ export function useVoiceRoom(
 
   const send = useCallback((payload: SignalPayload) => {
     void chanRef.current?.send({ type: "broadcast", event: "signal", payload });
+  }, []);
+
+  /**
+   * Republica o meu estado na presença da mesa. Chamado ao entrar e sempre que
+   * eu começo/paro de transmitir ou mudo de ideia sobre o que quero assistir.
+   */
+  const publicarPresenca = useCallback(() => {
+    const chan = chanRef.current;
+    if (!chan || !userId) return;
+    const payload: PresencaDeVoz = {
+      userId,
+      at: entradaRef.current,
+      video: videoModeRef.current,
+      assistindo: assistindoRef.current,
+    };
+    void chan.track(payload).catch(() => undefined);
+  }, [userId]);
+
+  /**
+   * Manda a minha faixa de vídeo só para quem pediu, e `null` para o resto.
+   *
+   * Em malha cada peer tem o seu próprio sender, então dá para transmitir para
+   * uns e não para outros. Quem não pediu não recebe pacote nenhum: economiza a
+   * banda dele e o encoder daquela conexão nem roda. E `replaceTrack` não
+   * renegocia, então entrar e sair da transmissão não sacode a mesa.
+   */
+  const aplicarVideoNosPeers = useCallback(() => {
+    const track = videoStreamRef.current?.getVideoTracks()[0] ?? null;
+    peersRef.current.forEach((box, id) => {
+      const alvo = quemQuerMeuVideoRef.current.has(id) ? track : null;
+      if (box.videoAtual === alvo) return;
+      box.videoAtual = alvo;
+      if (box.videoSender) {
+        void box.videoSender.replaceTrack(alvo).catch(() => undefined);
+      } else if (alvo && videoStreamRef.current) {
+        // Só cai aqui num navegador sem addTransceiver, onde o sender não pôde
+        // nascer junto com o peer. Aqui renegocia, e tudo bem: é o caminho raro.
+        box.videoSender = box.pc.addTrack(alvo, videoStreamRef.current);
+      }
+    });
+  }, []);
+
+  /** Peço para receber o vídeo de alguém. O pedido viaja na presença. */
+  const assistir = useCallback((remoteId: string) => {
+    setAssistindo((prev) => (prev.includes(remoteId) ? prev : [...prev, remoteId]));
+  }, []);
+
+  /** Paro de receber. Do outro lado o sender volta a mandar `null` na hora. */
+  const pararDeAssistir = useCallback((remoteId: string) => {
+    setAssistindo((prev) =>
+      prev.includes(remoteId) ? prev.filter((id) => id !== remoteId) : prev,
+    );
   }, []);
 
   /** Reaplica o botão de mudo na faixa que acabou de entrar no ar. */
@@ -313,6 +408,7 @@ export function useVoiceRoom(
         ignoreOffer: false,
         audioSender: null,
         videoSender: null,
+        videoAtual: null,
         renegociarPendente: false,
       };
       peersRef.current.set(remoteId, box);
@@ -322,20 +418,16 @@ export function useVoiceRoom(
         box.audioSender = pc.addTrack(aTrack, micStreamRef.current);
       }
       // O transceiver de vídeo nasce com o peer, mesmo sem ninguém transmitindo:
-      // é o que permite começar e parar depois sem renegociar nada. Se já
-      // houver transmissão em curso, ele já nasce com a faixa.
-      const vTrack = videoStreamRef.current?.getVideoTracks()[0] ?? null;
+      // é o que permite começar e parar depois sem renegociar nada. Nasce VAZIO
+      // mesmo que eu já esteja transmitindo — quem chega não recebe vídeo até
+      // pedir. Quem pedir entra por `aplicarVideoNosPeers`, na sincronização de
+      // presença que vem logo em seguida.
       try {
-        const transceiver = pc.addTransceiver(vTrack ?? "video", {
-          direction: "sendonly",
-          ...(videoStreamRef.current ? { streams: [videoStreamRef.current] } : {}),
-        });
+        const transceiver = pc.addTransceiver("video", { direction: "sendonly" });
         box.videoSender = transceiver.sender;
       } catch {
-        // Navegador sem addTransceiver: cai no caminho antigo, que renegocia.
-        if (vTrack && videoStreamRef.current) {
-          box.videoSender = pc.addTrack(vTrack, videoStreamRef.current);
-        }
+        // Navegador sem addTransceiver: o sender nasce lá no aplicarVideoNosPeers,
+        // por addTrack, quando alguém pedir de fato.
       }
 
       pc.onicecandidate = (e) => {
@@ -449,12 +541,34 @@ export function useVoiceRoom(
       chanRef.current = chan;
 
       chan.on("presence", { event: "sync" }, () => {
-        const state = chan.presenceState();
+        const state = chan.presenceState<PresencaDeVoz>();
         const todos = Object.keys(state);
         // Você primeiro, sempre: a ordem das chaves da presença é a ordem em que
         // as pessoas chegaram, e ver a própria tampinha pulando de lugar quando
         // alguém entra é estranho.
         setParticipants([userId, ...todos.filter((id) => id !== userId)]);
+        // Quem transmite o quê, e quem quer o MEU vídeo. Os dois saem da mesma
+        // varredura porque saem da mesma presença.
+        const transmitindo: Record<string, Transmissao> = {};
+        const querem = new Set<string>();
+        for (const [id, entradas] of Object.entries(state)) {
+          if (id === userId) continue;
+          // Uma pessoa pode ter mais de uma conexão sob a mesma chave; a última
+          // é a que vale.
+          const p = entradas[entradas.length - 1];
+          if (!p) continue;
+          if (p.video === "camera" || p.video === "screen") transmitindo[id] = p.video;
+          if (p.assistindo?.includes(userId)) querem.add(id);
+        }
+        quemQuerMeuVideoRef.current = querem;
+        setTransmissoes(transmitindo);
+        // Quem parou de transmitir (ou saiu) some da minha lista sozinho, senão
+        // eu ficaria pedindo para sempre um vídeo que não existe mais.
+        setAssistindo((prev) => {
+          const proximo = prev.filter((id) => transmitindo[id]);
+          return proximo.length === prev.length ? prev : proximo;
+        });
+
         const ids = todos.filter((id) => id !== userId);
         ids.forEach((id) => {
           if (!peersRef.current.has(id)) {
@@ -469,6 +583,11 @@ export function useVoiceRoom(
         Array.from(peersRef.current.keys()).forEach((id) => {
           if (!ids.includes(id)) dropPeer(id);
         });
+        // Por último, com os peers já criados: quem passou a querer o meu vídeo
+        // recebe a faixa, quem desistiu recebe `null`. É idempotente, então
+        // rodar a cada sincronização é justamente o que conserta um pedido que
+        // se perdeu no caminho.
+        aplicarVideoNosPeers();
       });
 
       chan.on("broadcast", { event: "signal" }, async ({ payload }) => {
@@ -502,9 +621,10 @@ export function useVoiceRoom(
         }
       });
 
-      chan.subscribe(async (status) => {
+      chan.subscribe((status) => {
         if (status === "SUBSCRIBED") {
-          await chan.track({ userId, at: Date.now() });
+          entradaRef.current = Date.now();
+          publicarPresenca();
           setConnected(true);
         }
       });
@@ -522,6 +642,9 @@ export function useVoiceRoom(
       remoteStreamsRef.current.clear();
       setRemotePeers([]);
       setParticipants([]);
+      setTransmissoes({});
+      setAssistindo([]);
+      quemQuerMeuVideoRef.current = new Set();
       // Com o grafo montado a faixa publicada é outra que não a crua; parar só
       // uma das duas deixaria o microfone aberto. Parar as duas é seguro porque
       // stop() numa faixa já parada não faz nada.
@@ -545,7 +668,24 @@ export function useVoiceRoom(
       if (chanRef.current) void supabase.removeChannel(chanRef.current);
       chanRef.current = null;
     };
-  }, [channelId, userId, createPeer, dropPeer, send, aplicarMudo, montarGrafoDeAudio]);
+  }, [
+    channelId,
+    userId,
+    createPeer,
+    dropPeer,
+    send,
+    aplicarMudo,
+    montarGrafoDeAudio,
+    aplicarVideoNosPeers,
+    publicarPresenca,
+  ]);
+
+  // O que eu transmito e o que eu quero assistir são estado, e estado vive na
+  // presença. Republicar é o que faz o outro lado começar (ou parar) de mandar.
+  useEffect(() => {
+    videoModeRef.current = videoMode;
+    publicarPresenca();
+  }, [videoMode, assistindo, publicarPresenca]);
 
   // ---- controls -----------------------------------------------------------
   // Mexer no slider, no gate ou na IA vale na hora, sem sair e voltar para a
@@ -610,11 +750,10 @@ export function useVoiceRoom(
     setVideoMode("none");
     // replaceTrack(null) e não removeTrack: o sender continua de pé, ninguém
     // renegocia, e do outro lado a faixa fica muda na hora — que é o sinal que
-    // o publish() agora lê para tirar o tile da tela.
-    peersRef.current.forEach((box) => {
-      void box.videoSender?.replaceTrack(null).catch(() => undefined);
-    });
-  }, []);
+    // o publish() agora lê para tirar o tile da tela. Com videoStreamRef já
+    // nulo, o aplicar manda `null` para todo mundo.
+    aplicarVideoNosPeers();
+  }, [aplicarVideoNosPeers]);
 
   const startVideo = useCallback(
     async (mode: "camera" | "screen") => {
@@ -636,15 +775,10 @@ export function useVoiceRoom(
         setVideoMode(mode);
 
         const track = stream.getVideoTracks()[0];
-        if (track) {
-          track.onended = () => stopVideo();
-          peersRef.current.forEach((box) => {
-            if (box.videoSender) void box.videoSender.replaceTrack(track).catch(() => undefined);
-            // Só cai aqui num navegador sem addTransceiver, onde o sender não
-            // pôde nascer junto com o peer.
-            else box.videoSender = box.pc.addTrack(track, stream);
-          });
-        }
+        if (track) track.onended = () => stopVideo();
+        // Começar a transmitir NÃO empurra vídeo para ninguém: só sai para quem
+        // já tinha pedido. Os outros veem o convite no painel e decidem.
+        aplicarVideoNosPeers();
       } catch {
         setError(
           mode === "screen"
@@ -653,7 +787,7 @@ export function useVoiceRoom(
         );
       }
     },
-    [stopVideo],
+    [stopVideo, aplicarVideoNosPeers],
   );
 
   return {
@@ -668,6 +802,10 @@ export function useVoiceRoom(
     stopVideo,
     error,
     participants,
+    transmissoes,
+    assistindo,
+    assistir,
+    pararDeAssistir,
     // O `|| 1` cobre a janela entre entrar e a primeira sincronização da
     // presença chegar: nesse instante você já está na mesa, só ainda não se viu.
     participantCount: participants.length || 1,
