@@ -185,11 +185,19 @@ export function useVoiceRoom(
       Array.from(remoteStreamsRef.current.entries()).map(([id, stream]) => ({
         userId: id,
         stream,
-        // `muted` é o que separa uma transmissão viva de uma que o outro lado
-        // já encerrou: removeTrack/replaceTrack(null) deixam a faixa remota
-        // muda, mas com readyState ainda em "live". Olhar só o readyState era o
-        // que mantinha o último quadro congelado na tela.
-        hasVideo: stream.getVideoTracks().some((t) => !t.muted && t.readyState === "live"),
+        // Duas condições, e as duas são necessárias.
+        //
+        // Ter pedido, primeiro: sem isso o quadro de alguém pode voltar sozinho
+        // depois de eu ter fechado, porque a faixa continua no receiver e um
+        // `unmute` atrasado a reacende.
+        //
+        // E `muted`, depois, que é o que separa uma transmissão viva de uma que
+        // o outro lado já encerrou: removeTrack/replaceTrack(null) deixam a
+        // faixa remota muda, mas com readyState ainda em "live". Olhar só o
+        // readyState era o que mantinha o último quadro congelado na tela.
+        hasVideo:
+          assistindoRef.current.includes(id) &&
+          stream.getVideoTracks().some((t) => !t.muted && t.readyState === "live"),
       })),
     );
   }, []);
@@ -240,17 +248,107 @@ export function useVoiceRoom(
     });
   }, []);
 
-  /** Peço para receber o vídeo de alguém. O pedido viaja na presença. */
-  const assistir = useCallback((remoteId: string) => {
-    setAssistindo((prev) => (prev.includes(remoteId) ? prev : [...prev, remoteId]));
-  }, []);
+  /**
+   * Prende a faixa recebida ao stream do participante e liga os avisos de
+   * estado. Usado no `ontrack` e de novo quando eu volto a assistir alguém:
+   * `replaceTrack` do outro lado NÃO dispara um segundo `ontrack`, então a
+   * faixa que volta é sempre esta mesma, vinda do receiver.
+   */
+  const armarFaixa = useCallback(
+    (remoteId: string, track: MediaStreamTrack) => {
+      let stream = remoteStreamsRef.current.get(remoteId);
+      if (!stream) {
+        stream = new MediaStream();
+        remoteStreamsRef.current.set(remoteId, stream);
+      }
+      const alvo = stream;
+      // Uma faixa de vídeo por pessoa. Sem isso, quem parava e voltava a
+      // transmitir deixava a faixa morta no stream, e o <video> renderiza a
+      // primeira — a congelada — em vez da nova.
+      if (track.kind === "video") {
+        alvo.getVideoTracks().forEach((t) => {
+          if (t.id !== track.id) alvo.removeTrack(t);
+        });
+      }
+      if (!alvo.getTracks().some((t) => t.id === track.id)) alvo.addTrack(track);
+      track.onended = () => {
+        alvo.removeTrack(track);
+        publish();
+      };
+      track.onmute = publish;
+      track.onunmute = publish;
+      publish();
+    },
+    [publish],
+  );
 
-  /** Paro de receber. Do outro lado o sender volta a mandar `null` na hora. */
-  const pararDeAssistir = useCallback((remoteId: string) => {
-    setAssistindo((prev) =>
-      prev.includes(remoteId) ? prev.filter((id) => id !== remoteId) : prev,
-    );
-  }, []);
+  /**
+   * Solta o vídeo que estou RECEBENDO de alguém, sem encostar no áudio dela.
+   *
+   * Esperar o outro lado não funciona, e é isto que deixava o botão "Parar de
+   * assistir" sem efeito: `replaceTrack(null)` lá NÃO encerra a faixa aqui, só
+   * a deixa muda. `onended` nunca vem, e o `onmute` que sobra só chega depois
+   * de uma ida e volta pela presença — se ela demorar ou se perder, o quadro
+   * fica na tela para sempre. Quem manda em parar de ver sou eu, na hora.
+   *
+   * O stream é mutado NO LUGAR, de propósito. Trocá-lo por um MediaStream novo
+   * faria `saidaDeAudio.conectar` enxergar outro stream e refazer o ramo de
+   * áudio da pessoa — fechar a tela de alguém cortaria a voz dela por um
+   * instante. É a identidade do stream que segura o ramo de pé.
+   *
+   * A faixa NÃO é parada com `stop()`: ela é a mesma que volta se eu pedir de
+   * novo, e uma faixa remota parada não ressuscita.
+   */
+  const soltarVideoRecebido = useCallback(
+    (remoteId: string) => {
+      const stream = remoteStreamsRef.current.get(remoteId);
+      const faixas = stream?.getVideoTracks() ?? [];
+      if (!stream || faixas.length === 0) return;
+      faixas.forEach((t) => {
+        t.onended = null;
+        t.onmute = null;
+        t.onunmute = null;
+        stream.removeTrack(t);
+      });
+      publish();
+    },
+    [publish],
+  );
+
+  /** Peço para receber o vídeo de alguém. O pedido viaja na presença. */
+  const assistir = useCallback(
+    (remoteId: string) => {
+      if (!assistindoRef.current.includes(remoteId)) {
+        // O ref anda antes do estado: `publish` lê a lista daqui, e ele roda
+        // ainda dentro deste clique.
+        assistindoRef.current = [...assistindoRef.current, remoteId];
+      }
+      const faixa = peersRef.current
+        .get(remoteId)
+        ?.pc.getReceivers()
+        .find((r) => r.track?.kind === "video")?.track;
+      if (faixa) armarFaixa(remoteId, faixa);
+      setAssistindo((prev) => (prev.includes(remoteId) ? prev : [...prev, remoteId]));
+    },
+    [armarFaixa],
+  );
+
+  /**
+   * Paro de receber. A desmontagem é local e imediata — para de renderizar,
+   * solta a faixa — e só DEPOIS o pedido viaja: o efeito de `assistindo`
+   * republica a presença, e do outro lado o sender volta a mandar `null`, que
+   * é o que devolve a banda.
+   */
+  const pararDeAssistir = useCallback(
+    (remoteId: string) => {
+      assistindoRef.current = assistindoRef.current.filter((id) => id !== remoteId);
+      soltarVideoRecebido(remoteId);
+      setAssistindo((prev) =>
+        prev.includes(remoteId) ? prev.filter((id) => id !== remoteId) : prev,
+      );
+    },
+    [soltarVideoRecebido],
+  );
 
   /** Reaplica o botão de mudo na faixa que acabou de entrar no ar. */
   const aplicarMudo = useCallback((stream: MediaStream | null) => {
@@ -481,27 +579,11 @@ export function useVoiceRoom(
       };
 
       pc.ontrack = (e) => {
-        let stream = remoteStreamsRef.current.get(remoteId);
-        if (!stream) {
-          stream = new MediaStream();
-          remoteStreamsRef.current.set(remoteId, stream);
-        }
-        // Uma faixa de vídeo por pessoa. Sem isso, quem parava e voltava a
-        // transmitir deixava a faixa morta no stream, e o <video> renderiza a
-        // primeira — a congelada — em vez da nova.
-        if (e.track.kind === "video") {
-          stream.getVideoTracks().forEach((t) => {
-            if (t.id !== e.track.id) stream!.removeTrack(t);
-          });
-        }
-        if (!stream.getTracks().some((t) => t.id === e.track.id)) stream.addTrack(e.track);
-        e.track.onended = () => {
-          stream?.removeTrack(e.track);
-          publish();
-        };
-        e.track.onmute = publish;
-        e.track.onunmute = publish;
-        publish();
+        // Vídeo que eu não pedi não entra no stream. Ele CHEGA de qualquer
+        // jeito — o transceiver nasce com o peer —, mas ficar de fora até eu
+        // pedir é o que mantém a lista de faixas honesta.
+        if (e.track.kind === "video" && !assistindoRef.current.includes(remoteId)) return;
+        armarFaixa(remoteId, e.track);
       };
 
       pc.onconnectionstatechange = () => {
@@ -515,7 +597,7 @@ export function useVoiceRoom(
 
       return box;
     },
-    [publish, send, userId],
+    [armarFaixa, publish, send, userId],
   );
 
   const dropPeer = useCallback(
@@ -592,7 +674,13 @@ export function useVoiceRoom(
         // eu ficaria pedindo para sempre um vídeo que não existe mais.
         setAssistindo((prev) => {
           const proximo = prev.filter((id) => transmitindo[id]);
-          return proximo.length === prev.length ? prev : proximo;
+          if (proximo.length === prev.length) return prev;
+          // Mesma desmontagem do botão, pelo outro motivo: quem parou de
+          // transmitir (ou saiu) tem a faixa solta aqui também. Sem isto o
+          // quadro fica congelado esperando um `onended` que não vem.
+          assistindoRef.current = proximo;
+          prev.filter((id) => !transmitindo[id]).forEach(soltarVideoRecebido);
+          return proximo;
         });
 
         const ids = todos.filter((id) => id !== userId);
@@ -673,6 +761,7 @@ export function useVoiceRoom(
       setTransmissoes({});
       setEstadosDeAudio({});
       setAssistindo([]);
+      assistindoRef.current = [];
       quemQuerMeuVideoRef.current = new Set();
       // Com o grafo montado a faixa publicada é outra que não a crua; parar só
       // uma das duas deixaria o microfone aberto. Parar as duas é seguro porque
@@ -707,6 +796,7 @@ export function useVoiceRoom(
     montarGrafoDeAudio,
     aplicarVideoNosPeers,
     publicarPresenca,
+    soltarVideoRecebido,
   ]);
 
   // O que eu transmito e o que eu quero assistir são estado, e estado vive na

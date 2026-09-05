@@ -61,7 +61,16 @@ function VideoTile({
 }) {
   const ref = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
-    if (ref.current) ref.current.srcObject = stream;
+    const el = ref.current;
+    if (!el) return;
+    el.srcObject = stream;
+    // Largar o srcObject é o que solta a referência ao stream — o mesmo motivo
+    // documentado em `soltar`, no saidaDeAudio. Sem isto, o elemento que sai da
+    // tela ao fechar uma transmissão continua segurando o stream (e o decoder
+    // de vídeo junto) até o coletor passar, se passar.
+    return () => {
+      el.srcObject = null;
+    };
   }, [stream]);
   return (
     <div
