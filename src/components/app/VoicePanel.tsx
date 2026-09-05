@@ -81,10 +81,16 @@ function VideoTile({
         {label}
       </span>
       {onParar && (
+        /*
+         * Sólido no neon da identidade, e não um ghost translúcido. Este botão
+         * fica POR CIMA de vídeo arbitrário: um fundo semitransparente herda o
+         * contraste do quadro que estiver passando atrás, e num gameplay claro
+         * ele simplesmente some. Cor chapada resolve o contraste sozinha, e o
+         * anel escuro separa a borda de um quadro que seja quase da mesma cor.
+         */
         <Button
           size="sm"
-          variant="secondary"
-          className="bg-background/85 hover:bg-background absolute top-2 right-2 h-7 px-2 text-xs"
+          className="bg-neon text-neon-foreground hover:bg-neon/90 absolute top-2 right-2 h-7 px-2 text-xs font-semibold shadow-md ring-1 ring-black/25"
           onClick={onParar}
         >
           <EyeOff className="size-3.5" /> Parar de assistir
