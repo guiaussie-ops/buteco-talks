@@ -72,6 +72,17 @@ const ICE_SERVERS: RTCConfiguration = {
   ],
 };
 
+/**
+ * Backoff da volta por cima: 2s, 4s, 8s, 16s, e daí em diante de 30 em 30.
+ *
+ * Começa curto porque a maioria dos `disconnected` é um soluço de rede que se
+ * resolve em segundos, e tenta para sempre porque o outro lado pode estar num
+ * túnel de metrô: desistir deixaria a mesa quebrada até alguém entrar ou sair
+ * para acordar a presença — que é exatamente o bug que isto conserta.
+ */
+const BACKOFF_BASE_MS = 2_000;
+const BACKOFF_TETO_MS = 30_000;
+
 type PeerBox = {
   pc: RTCPeerConnection;
   polite: boolean;
@@ -93,6 +104,10 @@ type PeerBox = {
   videoAtual: MediaStreamTrack | null;
   /** Negociação que falhou por estado instável e precisa ser refeita. */
   renegociarPendente: boolean;
+  /** Tentativas de volta seguidas, sem sucesso no meio. Zera ao conectar. */
+  tentativas: number;
+  /** Tentativa agendada. Um por peer — o teardown depende disso para limpar. */
+  timerDeVolta: number | null;
 };
 
 /**
@@ -513,6 +528,110 @@ export function useVoiceRoom(
     antigo?.getTracks().forEach((t) => t.stop());
   }, [aplicarMudo, desmontarGrafoDeAudio, montarGrafoDeAudio, publicarFaixaDeAudio]);
 
+  /**
+   * `createPeer` por ref: a recuperação precisa RECRIAR o peer, e recriar é
+   * chamar `createPeer` de dentro de um handler que o próprio `createPeer`
+   * instalou. A ref quebra o ciclo sem congelar uma versão velha do callback.
+   */
+  const createPeerRef = useRef<((remoteId: string, polite: boolean) => PeerBox) | null>(null);
+
+  const cancelarVolta = useCallback((box: PeerBox) => {
+    if (box.timerDeVolta === null) return;
+    window.clearTimeout(box.timerDeVolta);
+    box.timerDeVolta = null;
+  }, []);
+
+  /**
+   * Quem oferece é sempre o mesmo lado, e é o mesmo critério do `createPeer`:
+   * o id menor é o impolido, e é ele quem reinicia o ICE. Os dois lados
+   * reiniciarem ao mesmo tempo é uma colisão de ofertas — a que já nos custou
+   * a tela preta com duas transmissões. O lado polido espera; se o impolido
+   * tiver sumido de vez, a conexão cai para `failed` e aí os dois recriam.
+   */
+  const souImpolido = useCallback((remoteId: string) => !!userId && userId < remoteId, [userId]);
+
+  /**
+   * Recria a conexão do zero, preservando o meu lugar na mesa.
+   *
+   * Isto NÃO pode depender do presence sync. Era essa a dependência escondida
+   * que fazia a transmissão só voltar quando quem transmitia fechava e reabria
+   * o app: fechar e reabrir é um leave + join, e o sync que ele dispara era o
+   * único lugar que recriava peers. Sem ninguém entrando ou saindo, o peer
+   * deletado ficava deletado para sempre.
+   *
+   * O stream remoto é jogado fora junto, de propósito — ao contrário de parar
+   * de assistir, onde a identidade dele é sagrada. Um `MediaStreamAudioSource`
+   * fica preso à faixa que existia quando ele nasceu e não segue troca de
+   * faixa; com um peer novo, as faixas são outras, e reaproveitar o stream
+   * deixaria a pessoa muda para sempre. `saidaDeAudio.conectar` já sabe refazer
+   * o ramo preservando o volume que eu tinha escolhido para ela.
+   */
+  const recriarPeer = useCallback(
+    (remoteId: string) => {
+      const antigo = peersRef.current.get(remoteId);
+      if (antigo) {
+        cancelarVolta(antigo);
+        // Sem isto, o `onconnectionstatechange` do pc que está sendo fechado
+        // dispara com "closed" e agenda uma recuperação para um peer morto.
+        antigo.pc.onconnectionstatechange = null;
+        antigo.pc.oniceconnectionstatechange = null;
+        antigo.pc.onnegotiationneeded = null;
+        antigo.pc.onsignalingstatechange = null;
+        antigo.pc.onicecandidate = null;
+        antigo.pc.ontrack = null;
+        antigo.pc.close();
+      }
+      peersRef.current.delete(remoteId);
+      remoteStreamsRef.current.delete(remoteId);
+      publish();
+
+      const novo = createPeerRef.current?.(remoteId, !souImpolido(remoteId));
+      if (novo) novo.tentativas = (antigo?.tentativas ?? 0) + 1;
+      // Quem já queria o meu vídeo continua querendo: a presença não mudou, só
+      // a conexão. Sem isto, a transmissão voltaria preta até o próximo sync.
+      aplicarVideoNosPeers();
+      return novo;
+    },
+    [aplicarVideoNosPeers, cancelarVolta, publish, souImpolido],
+  );
+
+  /**
+   * Agenda a próxima tentativa de volta, com backoff. Reagenda sozinha até a
+   * conexão voltar a `connected` — quem cancela é o handler de estado.
+   */
+  const agendarVolta = useCallback(
+    (box: PeerBox, remoteId: string) => {
+      if (box.timerDeVolta !== null) return;
+      const espera = Math.min(BACKOFF_TETO_MS, BACKOFF_BASE_MS * 2 ** box.tentativas);
+      box.timerDeVolta = window.setTimeout(() => {
+        box.timerDeVolta = null;
+        // O box pode ter sido substituído por um `recriarPeer` no meio do
+        // caminho; o timer velho não manda em conexão nova.
+        if (peersRef.current.get(remoteId) !== box) return;
+        const estado = box.pc.connectionState;
+        if (estado === "connected" || estado === "closed") return;
+
+        if (estado === "failed") {
+          recriarPeer(remoteId);
+          return;
+        }
+        box.tentativas += 1;
+        if (souImpolido(remoteId)) {
+          try {
+            // Dispara onnegotiationneeded, e a oferta que sai já vai com
+            // ice-restart. Quem renegocia é o `negociar` de sempre.
+            box.pc.restartIce();
+          } catch {
+            // Navegador sem restartIce: não dá para consertar de leve, então
+            // deixa a conexão seguir para `failed` e recriar por inteiro.
+          }
+        }
+        agendarVolta(box, remoteId);
+      }, espera);
+    },
+    [recriarPeer, souImpolido],
+  );
+
   const createPeer = useCallback(
     (remoteId: string, polite: boolean) => {
       const existing = peersRef.current.get(remoteId);
@@ -528,6 +647,8 @@ export function useVoiceRoom(
         videoSender: null,
         videoAtual: null,
         renegociarPendente: false,
+        tentativas: 0,
+        timerDeVolta: null,
       };
       peersRef.current.set(remoteId, box);
 
@@ -586,28 +707,83 @@ export function useVoiceRoom(
         armarFaixa(remoteId, e.track);
       };
 
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "failed" || pc.connectionState === "closed") {
-          pc.close();
-          peersRef.current.delete(remoteId);
-          remoteStreamsRef.current.delete(remoteId);
-          publish();
+      /**
+       * Três estados, três respostas diferentes — e nenhuma delas é apagar o
+       * peer e esperar. `disconnected` é soluço e se resolve com ICE novo;
+       * `failed` é rota perdida e pede conexão nova; `connected` é a hora de
+       * esquecer que houve problema.
+       */
+      const aoMudarEstado = () => {
+        // Um pc que já foi substituído não manda mais em nada.
+        if (peersRef.current.get(remoteId) !== box) return;
+        switch (pc.connectionState) {
+          case "connected":
+            cancelarVolta(box);
+            box.tentativas = 0;
+            publish();
+            break;
+          case "disconnected":
+            // Recuperável: quase sempre volta sozinho antes do primeiro timer.
+            agendarVolta(box, remoteId);
+            break;
+          case "failed":
+            // Não espera o backoff da primeira vez: `failed` já é o fim da
+            // linha do ICE, e a reconstrução é o único caminho de volta.
+            cancelarVolta(box);
+            recriarPeer(remoteId);
+            break;
+          case "closed":
+            cancelarVolta(box);
+            break;
+        }
+      };
+
+      pc.onconnectionstatechange = aoMudarEstado;
+      /**
+       * O mesmo tratamento pela porta do ICE. Não é redundância: o Safari e o
+       * Firefox demoram (ou deixam de) mover `connectionState`, e é o
+       * `iceConnectionState` que muda primeiro. Como as duas rotas passam pelo
+       * mesmo lugar e `agendarVolta` ignora agendamento em dobro, chegar pelas
+       * duas não faz nada além de chegar mais cedo.
+       */
+      pc.oniceconnectionstatechange = () => {
+        if (peersRef.current.get(remoteId) !== box) return;
+        const estado = pc.iceConnectionState;
+        if (estado === "connected" || estado === "completed") {
+          cancelarVolta(box);
+          box.tentativas = 0;
+        } else if (estado === "disconnected") {
+          agendarVolta(box, remoteId);
+        } else if (estado === "failed") {
+          cancelarVolta(box);
+          recriarPeer(remoteId);
         }
       };
 
       return box;
     },
-    [armarFaixa, publish, send, userId],
+    [agendarVolta, armarFaixa, cancelarVolta, publish, recriarPeer, send, userId],
   );
+
+  // Fecha o ciclo: `recriarPeer` chama `createPeer` por aqui.
+  createPeerRef.current = createPeer;
 
   const dropPeer = useCallback(
     (remoteId: string) => {
-      peersRef.current.get(remoteId)?.pc.close();
+      const box = peersRef.current.get(remoteId);
+      if (box) {
+        cancelarVolta(box);
+        // A pessoa saiu da mesa: o "closed" que vem do close() não pode
+        // agendar uma volta para quem não está mais aqui.
+        box.pc.onconnectionstatechange = null;
+        box.pc.oniceconnectionstatechange = null;
+        box.pc.close();
+      }
       peersRef.current.delete(remoteId);
       remoteStreamsRef.current.delete(remoteId);
       publish();
     },
-    [publish],
+    [cancelarVolta, publish],
   );
 
   // ---- join / leave -------------------------------------------------------
@@ -707,7 +883,15 @@ export function useVoiceRoom(
       chan.on("broadcast", { event: "signal" }, async ({ payload }) => {
         const msg = payload as SignalPayload;
         if (msg.to !== userId) return;
-        const box = peersRef.current.get(msg.from) ?? createPeer(msg.from, userId > msg.from);
+        let box = peersRef.current.get(msg.from);
+        // Peer morto do meu lado, oferta chegando do outro: quem detectou a
+        // queda primeiro já se reconstruiu e está oferecendo. Aplicar isso numa
+        // conexão em `failed` só produz erro de estado — e é o caso comum,
+        // porque nem sempre os dois lados percebem a queda ao mesmo tempo.
+        if (box && (box.pc.connectionState === "failed" || box.pc.connectionState === "closed")) {
+          box = recriarPeer(msg.from);
+        }
+        if (!box) box = createPeer(msg.from, userId > msg.from);
         const { pc } = box;
         try {
           if (msg.description) {
@@ -753,7 +937,13 @@ export function useVoiceRoom(
       // sala, não há mais presença para publicar nem faixa para reabrir.
       setMicOnState(true);
       micOnRef.current = true;
-      peersRef.current.forEach((b) => b.pc.close());
+      peersRef.current.forEach((b) => {
+        if (b.timerDeVolta !== null) window.clearTimeout(b.timerDeVolta);
+        b.timerDeVolta = null;
+        b.pc.onconnectionstatechange = null;
+        b.pc.oniceconnectionstatechange = null;
+        b.pc.close();
+      });
       peersRef.current.clear();
       remoteStreamsRef.current.clear();
       setRemotePeers([]);
@@ -797,6 +987,7 @@ export function useVoiceRoom(
     aplicarVideoNosPeers,
     publicarPresenca,
     soltarVideoRecebido,
+    recriarPeer,
   ]);
 
   // O que eu transmito e o que eu quero assistir são estado, e estado vive na
