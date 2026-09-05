@@ -1,4 +1,13 @@
-import { Mic, MicOff, MonitorUp, MonitorX, PhoneOff, Volume2 } from "lucide-react";
+import {
+  Headphones,
+  HeadphoneOff,
+  Mic,
+  MicOff,
+  MonitorUp,
+  MonitorX,
+  PhoneOff,
+  Volume2,
+} from "lucide-react";
 import { useVoice } from "@/lib/voice";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +55,22 @@ export function VoiceBar({ onOpenRoom }: { onOpenRoom?: (channelId: string) => v
           )}
         >
           {voice.micOn ? <Mic className="size-4" /> : <MicOff className="size-4" />}
+        </button>
+        <button
+          onClick={voice.toggleDeafen}
+          title={
+            voice.deafened
+              ? "Voltar a ouvir a mesa"
+              : "Parar de ouvir a mesa — fecha o seu microfone junto"
+          }
+          className={cn(
+            "flex flex-1 items-center justify-center rounded-md py-1.5 transition-colors",
+            voice.deafened
+              ? "bg-destructive/20 text-destructive hover:bg-destructive/30"
+              : "bg-muted/40 hover:bg-muted text-foreground",
+          )}
+        >
+          {voice.deafened ? <HeadphoneOff className="size-4" /> : <Headphones className="size-4" />}
         </button>
         <button
           onClick={() => void voice.toggleVideo("screen")}

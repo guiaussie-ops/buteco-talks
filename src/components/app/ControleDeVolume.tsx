@@ -1,17 +1,24 @@
 import type { ReactNode } from "react";
-import { VolumeX } from "lucide-react";
+import { MicOff, Volume2, VolumeX } from "lucide-react";
 import { useVoice } from "@/lib/voice";
+import { AUDIO_DO_PARTICIPANTE_PADRAO } from "@/lib/mediaPrefs";
+import { VOLUME_MAXIMO } from "@/lib/saidaDeAudio";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 
-/** Volume individual de um participante, em 0 a 100. */
-export function useVolumeDoParticipante(userId: string) {
+/** O slider vai até aqui. 100% é o volume original; acima disso, ver o aviso no popover. */
+const PERCENT_MAXIMO = VOLUME_MAXIMO * 100;
+
+/** Volume e mudo de um participante, do seu ponto de vista. */
+export function useAudioDoParticipante(userId: string) {
   const voice = useVoice();
-  const percent = Math.round((voice.peerVolumes[userId] ?? 1) * 100);
+  const atual = voice.peerAudio[userId] ?? AUDIO_DO_PARTICIPANTE_PADRAO;
   return {
-    percent,
+    percent: Math.round(atual.volume * 100),
+    muted: atual.muted,
     definir: (p: number) => voice.setPeerVolume(userId, p / 100),
+    alternarMudo: () => voice.togglePeerMute(userId),
   };
 }
 
@@ -20,8 +27,17 @@ export function SeloDeMudo({ className }: { className?: string }) {
   return <VolumeX className={cn("text-muted-foreground/70 shrink-0", className)} />;
 }
 
+/** Marca de "esta pessoa está com o microfone fechado" — isso ela publicou. */
+export function SeloDeMicFechado({ className }: { className?: string }) {
+  return <MicOff className={cn("text-muted-foreground/70 shrink-0", className)} />;
+}
+
 /**
  * Volume de uma pessoa só, para quem está ouvindo — não mexe no que ela envia.
+ *
+ * Tudo aqui é ESTRITAMENTE LOCAL: o que você escolhe vai para o seu
+ * localStorage e para o seu grafo de saída, e para mais lugar nenhum. A pessoa
+ * mutada não é avisada, e o resto da mesa continua ouvindo ela normalmente.
  *
  * Envolve o que for passado como filho e abre no clique, nunca no hover: no
  * celular não existe hover. Vive nos dois lugares em que a tampinha aparece,
@@ -40,7 +56,7 @@ export function ControleDeVolume({
   align?: "start" | "center" | "end";
   children: ReactNode;
 }) {
-  const { percent, definir } = useVolumeDoParticipante(userId);
+  const { percent, muted, definir, alternarMudo } = useAudioDoParticipante(userId);
 
   return (
     <Popover>
@@ -49,22 +65,49 @@ export function ControleDeVolume({
           "focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none",
           className,
         )}
-        aria-label={`Volume de ${name}: ${percent}%`}
+        aria-label={`Volume de ${name}: ${muted ? "mudo" : `${percent}%`}`}
       >
         {children}
       </PopoverTrigger>
-      <PopoverContent align={align} className="w-56 space-y-2 p-3">
-        <p className="truncate text-sm font-medium">{name}</p>
+      <PopoverContent align={align} className="w-60 space-y-2 p-3">
+        <div className="flex items-center gap-2">
+          <p className="min-w-0 flex-1 truncate text-sm font-medium">{name}</p>
+          <button
+            type="button"
+            onClick={alternarMudo}
+            aria-pressed={muted}
+            title={muted ? `Voltar a ouvir ${name}` : `Não ouvir ${name}`}
+            className={cn(
+              "rounded-md p-1.5 transition-colors",
+              muted
+                ? "bg-destructive/20 text-destructive hover:bg-destructive/30"
+                : "hover:bg-muted text-muted-foreground",
+            )}
+          >
+            {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+          </button>
+        </div>
+
         <Slider
           min={0}
-          max={100}
+          max={PERCENT_MAXIMO}
           step={5}
-          value={[percent]}
+          value={[muted ? 0 : percent]}
           onValueChange={([v]) => definir(v ?? 100)}
           aria-label={`Volume de ${name}`}
         />
+
         <p className="text-muted-foreground text-xs">
-          {percent === 0 ? "Mudo pra você" : `${percent}% — só pra você.`}
+          {muted ? (
+            `Mudo pra você — ${name} não sabe disso.`
+          ) : percent > 100 ? (
+            <>
+              {percent}% — só pra você.{" "}
+              <span className="text-warning">Acima de 100% pode distorcer.</span>
+            </>
+          ) : (
+            `${percent}% — só pra você.`
+          )}
         </p>
       </PopoverContent>
     </Popover>

@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import {
   Eye,
   EyeOff,
+  Headphones,
+  HeadphoneOff,
   Loader2,
   Mic,
   MicOff,
@@ -18,8 +20,9 @@ import { Bottlecap } from "@/components/Bottlecap";
 import { Button } from "@/components/ui/button";
 import {
   ControleDeVolume,
+  SeloDeMicFechado,
   SeloDeMudo,
-  useVolumeDoParticipante,
+  useAudioDoParticipante,
 } from "@/components/app/ControleDeVolume";
 import { cn } from "@/lib/utils";
 
@@ -33,16 +36,25 @@ type Props = {
   onLeave: () => void;
 };
 
+/**
+ * Um quadro de transmissão. SEMPRE mudo, e isto não é detalhe de estilo.
+ *
+ * O stream que chega de um participante carrega a voz e o vídeo dele juntos. Um
+ * <video> sem `muted` toca esse áudio por conta própria, no volume dele — em
+ * paralelo com o grafo de saída, que é quem o slider controla. Era exatamente
+ * esse o bug do "slider anda e o volume não muda": quem estava transmitindo
+ * continuava sendo ouvido em 100% por este elemento aqui, por baixo.
+ *
+ * A voz de todo mundo sai por um caminho só: `saidaDeAudio`. Aqui é imagem.
+ */
 function VideoTile({
   stream,
   label,
-  muted,
   main,
   onParar,
 }: {
   stream: MediaStream;
   label: string;
-  muted?: boolean | undefined;
   main?: boolean | undefined;
   /** Só nas transmissões dos outros: fechar devolve a banda na hora. */
   onParar?: (() => void) | undefined;
@@ -62,7 +74,7 @@ function VideoTile({
         ref={ref}
         autoPlay
         playsInline
-        muted={muted}
+        muted
         className={cn("w-full bg-black object-contain", main ? "aspect-video" : "aspect-video")}
       />
       <span className="bg-background/85 absolute bottom-2 left-2 rounded-md px-2 py-0.5 text-xs font-medium">
@@ -137,22 +149,35 @@ function PeerCap({
   name,
   src,
   speaking,
+  micOff,
 }: {
   userId: string;
   name: string;
   src?: string | null | undefined;
   speaking: boolean;
+  /** O microfone DELA está fechado — foi ela que publicou isso na presença. */
+  micOff: boolean;
 }) {
-  const { percent } = useVolumeDoParticipante(userId);
+  const { muted } = useAudioDoParticipante(userId);
+
+  // Os dois selos dizem coisas diferentes e não podem virar um só: o de mudo é
+  // uma escolha minha sobre o meu fone, o de microfone fechado é um fato sobre
+  // ela. Se eu mutei alguém que já está de microfone fechado, o meu vence na
+  // tampinha: é o que explica o silêncio se ela voltar a falar.
+  const selo = muted ? (
+    <SeloDeMudo className="size-3" />
+  ) : micOff ? (
+    <SeloDeMicFechado className="size-3" />
+  ) : null;
 
   return (
     <div className="flex w-16 flex-col items-center gap-1.5">
       <ControleDeVolume userId={userId} name={name} className="rounded-full">
         <span className="relative block">
           <Bottlecap name={name} src={src} speaking={speaking} className="size-12" />
-          {percent === 0 && (
+          {selo && (
             <span className="bg-background/85 absolute -right-0.5 -bottom-0.5 rounded-full p-0.5">
-              <SeloDeMudo className="size-3" />
+              {selo}
             </span>
           )}
         </span>
@@ -185,7 +210,6 @@ export function VoicePanel({
     id: string;
     stream: MediaStream;
     label: string;
-    muted?: boolean;
     onParar?: () => void;
   }[] = [];
   if (voice.localVideoStream) {
@@ -193,7 +217,6 @@ export function VoicePanel({
       id: "local",
       stream: voice.localVideoStream,
       label: voice.videoMode === "screen" ? "Sua tela" : "Sua câmera",
-      muted: true,
     });
   }
   videoPeers.forEach((p) =>
@@ -273,20 +296,13 @@ export function VoicePanel({
             <VideoTile
               stream={spotlight.stream}
               label={spotlight.label}
-              muted={spotlight.muted}
               onParar={spotlight.onParar}
               main
             />
             {rest.length > 0 && (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {rest.map((t) => (
-                  <VideoTile
-                    key={t.id}
-                    stream={t.stream}
-                    label={t.label}
-                    muted={t.muted}
-                    onParar={t.onParar}
-                  />
+                  <VideoTile key={t.id} stream={t.stream} label={t.label} onParar={t.onParar} />
                 ))}
               </div>
             )}
@@ -331,6 +347,7 @@ export function VoicePanel({
                     name={names[id] ?? "Participante"}
                     src={avatars[id]}
                     speaking={!!voice.speaking[id]}
+                    micOff={!!voice.estadosDeAudio[id]?.micOff}
                   />
                 ),
               )}
@@ -348,6 +365,20 @@ export function VoicePanel({
         >
           {voice.micOn ? <Mic className="size-4" /> : <MicOff className="size-4" />}
           {voice.micOn ? "Microfone" : "Desmutar"}
+        </Button>
+        <Button
+          variant={voice.deafened ? "destructive" : "secondary"}
+          size="sm"
+          disabled={!viewingActiveRoom}
+          onClick={voice.toggleDeafen}
+          title={
+            voice.deafened
+              ? "Voltar a ouvir a mesa (e reabrir o microfone, se estava aberto)"
+              : "Parar de ouvir a mesa — fecha o seu microfone junto"
+          }
+        >
+          {voice.deafened ? <HeadphoneOff className="size-4" /> : <Headphones className="size-4" />}
+          {voice.deafened ? "Voltar a ouvir" : "Fone"}
         </Button>
         <Button
           variant={voice.videoMode === "screen" ? "default" : "secondary"}

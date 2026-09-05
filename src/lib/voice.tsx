@@ -11,8 +11,23 @@ import {
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { useVoiceRoom, type RemotePeer, type Transmissao } from "@/hooks/useVoiceRoom";
-import { useMediaPrefs } from "@/lib/mediaPrefs";
+import {
+  useVoiceRoom,
+  type EstadoDeAudio,
+  type RemotePeer,
+  type Transmissao,
+} from "@/hooks/useVoiceRoom";
+import {
+  useMediaPrefs,
+  AUDIO_DO_PARTICIPANTE_PADRAO,
+  type AudioDoParticipante,
+} from "@/lib/mediaPrefs";
+import {
+  criarSaidaDeAudio,
+  ganhoEfetivo,
+  VOLUME_MAXIMO,
+  type SaidaDeAudio,
+} from "@/lib/saidaDeAudio";
 import { useSpeaking } from "@/hooks/useSpeaking";
 import { HEARTBEAT_MS, saidaComKeepalive } from "@/lib/voicePresence";
 
@@ -37,9 +52,19 @@ type VoiceContextValue = {
   pararDeAssistir: (userId: string) => void;
   speaking: Record<string, boolean>;
   participantCount: number;
-  /** volume individual de cada participante (0 a 1, 1 = sem atenuar) */
-  peerVolumes: Record<string, number>;
+  /** Microfone fechado / fone mudo de cada um dos OUTROS, vindo da presenca. */
+  estadosDeAudio: Record<string, EstadoDeAudio>;
+  /**
+   * Volume e mudo de cada participante, do MEU ponto de vista. Nada aqui sai
+   * da minha aba: mutar alguem nao avisa a pessoa nem afeta o resto da mesa.
+   */
+  peerAudio: Record<string, AudioDoParticipante>;
+  /** 0 a 2. Acima de 1 amplifica e pode clipar - ver VOLUME_MAXIMO. */
   setPeerVolume: (userId: string, volume: number) => void;
+  togglePeerMute: (userId: string) => void;
+  /** Meu fone esta mudo: nao ouco ninguem, e o meu microfone vai junto. */
+  deafened: boolean;
+  toggleDeafen: () => void;
   busy: boolean;
   join: (target: VoiceTarget) => void;
   leave: () => void;
@@ -48,36 +73,39 @@ type VoiceContextValue = {
 
 const VoiceContext = createContext<VoiceContextValue | null>(null);
 
-/** Toca o áudio de um participante. Vive no provider para sobreviver à troca de canal. */
-function AudioSink({
+/**
+ * Prende um participante ao grafo de saída enquanto ele estiver na mesa.
+ *
+ * Não renderiza nada: o <audio> que o Chrome exige para a faixa fluir é criado
+ * dentro de `saidaDeAudio`, junto com o resto do ramo, porque nasce e morre com
+ * ele. Este componente existe só para amarrar o ciclo de vida do ramo ao ciclo
+ * de vida do peer — é o React quem garante que o cleanup roda, inclusive quando
+ * o peer cai sem avisar. Numa malha de quinze pessoas, um ramo vazado é um
+ * stream remoto e dois AudioNodes que ninguém mais coleta.
+ */
+function RamoDoParticipante({
   peer,
-  speakerId,
-  volume,
+  saida,
+  ganho,
 }: {
   peer: RemotePeer;
-  speakerId: string | null;
-  volume: number;
+  saida: SaidaDeAudio | null;
+  ganho: number;
 }) {
-  const ref = useRef<HTMLAudioElement | null>(null);
-
   useEffect(() => {
-    if (ref.current) ref.current.srcObject = peer.stream;
-  }, [peer.stream]);
+    if (!saida) return;
+    saida.conectar(peer.userId, peer.stream);
+    return () => saida.desconectar(peer.userId);
+  }, [saida, peer.userId, peer.stream]);
 
+  // Roda depois do efeito acima, então o ramo já existe quando o ganho chega.
+  // `peer.stream` entra nas dependências porque o efeito de cima pode ter
+  // acabado de refazer o ramo, e um ramo novo nasce em 1.
   useEffect(() => {
-    if (ref.current) ref.current.volume = volume;
-  }, [volume]);
+    saida?.definirGanhoDoPeer(peer.userId, ganho);
+  }, [saida, peer.userId, ganho, peer.stream]);
 
-  useEffect(() => {
-    const el = ref.current as
-      (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null;
-    // setSinkId não existe em todo navegador (Firefox só com flag). Sem ele, o
-    // áudio sai no dispositivo padrão do sistema — degrada, não quebra.
-    if (!el?.setSinkId || !speakerId) return;
-    void el.setSinkId(speakerId).catch(() => undefined);
-  }, [speakerId]);
-
-  return <audio ref={ref} autoPlay playsInline />;
+  return null;
 }
 
 /**
@@ -104,8 +132,47 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState(false);
 
   const { prefs, setPrefs } = useMediaPrefs();
-  const room = useVoiceRoom(active?.channelId ?? null, userId, prefs);
+  /**
+   * Fone mudo. Mora aqui e não nas prefs de propósito: é estado de sessão, não
+   * preferência. Recarregar a página surdo, sem lembrar que foi você que
+   * apertou o botão, é um jeito ruim de descobrir que a mesa não quebrou.
+   */
+  const [deafened, setDeafened] = useState(false);
+  const room = useVoiceRoom(active?.channelId ?? null, userId, prefs, deafened);
   const activeChannelId = active?.channelId ?? null;
+
+  /**
+   * O grafo de saída. Um por sessão, criado com o provider e derrubado com ele:
+   * recriar o AudioContext a cada troca de canal pediria um novo gesto do
+   * usuário para destravá-lo, e navegador nenhum gosta de dezenas de contextos.
+   */
+  const [saida, setSaida] = useState<SaidaDeAudio | null>(null);
+  useEffect(() => {
+    const nova = criarSaidaDeAudio();
+    setSaida(nova);
+    return () => nova?.destruir();
+  }, []);
+
+  /**
+   * Ganho mestre: o volume geral, zerado pelo fone mudo.
+   *
+   * O deafen vive AQUI, num nó só, e não num laço zerando o ganho de cada
+   * pessoa. Um nó só significa que ele não tem como discordar do mudo
+   * individual: desativar o deafen não ressuscita quem eu tinha mutado, e
+   * mutar alguém não mexe no fone.
+   */
+  useEffect(() => {
+    saida?.definirGanhoMestre(deafened ? 0 : prefs.outputVolume);
+  }, [saida, deafened, prefs.outputVolume]);
+
+  useEffect(() => {
+    saida?.definirDispositivo(prefs.speakerId);
+  }, [saida, prefs.speakerId]);
+
+  // O contexto nasce suspenso até um gesto do usuário; entrar numa mesa é um.
+  useEffect(() => {
+    if (activeChannelId) saida?.retomar();
+  }, [activeChannelId, saida]);
 
   // Sair junto com a sessão do usuário.
   useEffect(() => {
@@ -250,11 +317,66 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
   const setPeerVolume = useCallback(
     (peerId: string, volume: number) => {
-      const v = Math.min(1, Math.max(0, volume));
-      setPrefs((atual) => ({ peerVolumes: { ...atual.peerVolumes, [peerId]: v } }));
+      const v = Math.min(VOLUME_MAXIMO, Math.max(0, volume));
+      // Arrastar o slider desmuta: pedir volume e continuar sem ouvir seria um
+      // controle que mente. Arrastar até 0 é o mudo, e continua sendo.
+      setPrefs((atual) => ({
+        peerAudio: { ...atual.peerAudio, [peerId]: { volume: v, muted: false } },
+      }));
     },
     [setPrefs],
   );
+
+  const togglePeerMute = useCallback(
+    (peerId: string) => {
+      setPrefs((atual) => {
+        const antes = atual.peerAudio[peerId] ?? AUDIO_DO_PARTICIPANTE_PADRAO;
+        // Desmutar quem estava em 0 não pode devolver silêncio: sem volume para
+        // onde voltar, volta para 100%.
+        const volume = antes.muted && antes.volume === 0 ? 1 : antes.volume;
+        return { peerAudio: { ...atual.peerAudio, [peerId]: { volume, muted: !antes.muted } } };
+      });
+    },
+    [setPrefs],
+  );
+
+  /**
+   * Fone mudo, no padrão do Discord: mutar o fone muta também o microfone —
+   * ninguém quer falar sozinho para uma mesa que não está ouvindo de volta.
+   *
+   * O detalhe que faz a diferença é a memória: se eu já estava com o microfone
+   * fechado ANTES de ficar surdo, desativar o deafen não pode reabrir o
+   * microfone. Sem isso, todo deafen vira um jeito acidental de voltar falando.
+   */
+  const micAntesDoDeafenRef = useRef(true);
+  const deafenedRef = useRef(false);
+  deafenedRef.current = deafened;
+
+  const toggleDeafen = useCallback(() => {
+    const agora = !deafenedRef.current;
+    if (agora) {
+      micAntesDoDeafenRef.current = room.micOn;
+      room.setMicOn(false);
+    } else if (micAntesDoDeafenRef.current) {
+      room.setMicOn(true);
+    }
+    setDeafened(agora);
+  }, [room]);
+
+  /**
+   * Reabrir o microfone com o fone mudo tira o fone do mudo. É o que o Discord
+   * faz, e é o que evita o beco sem saída: sem isto, quem aperta "desmutar"
+   * enquanto surdo volta a falar para uma mesa que continua sem ouvir.
+   */
+  const toggleMic = useCallback(() => {
+    if (deafenedRef.current && !room.micOn) {
+      micAntesDoDeafenRef.current = true;
+      setDeafened(false);
+      room.setMicOn(true);
+      return;
+    }
+    room.toggleMic();
+  }, [room]);
 
   const toggleVideo = useCallback(
     async (mode: "camera" | "screen") => {
@@ -298,7 +420,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       connected: room.connected,
       micOn: room.micOn,
       micStream: room.micStream,
-      toggleMic: room.toggleMic,
+      toggleMic,
       videoMode: room.videoMode,
       localVideoStream: room.localVideoStream,
       remotePeers: room.remotePeers,
@@ -309,28 +431,49 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       pararDeAssistir: room.pararDeAssistir,
       speaking,
       participantCount: room.participantCount,
-      peerVolumes: prefs.peerVolumes,
+      estadosDeAudio: room.estadosDeAudio,
+      peerAudio: prefs.peerAudio,
       setPeerVolume,
+      togglePeerMute,
+      deafened,
+      toggleDeafen,
       busy,
       join,
       leave,
       toggleVideo,
     }),
-    [active, room, speaking, prefs.peerVolumes, setPeerVolume, busy, join, leave, toggleVideo],
+    [
+      active,
+      room,
+      speaking,
+      prefs.peerAudio,
+      setPeerVolume,
+      togglePeerMute,
+      deafened,
+      toggleDeafen,
+      toggleMic,
+      busy,
+      join,
+      leave,
+      toggleVideo,
+    ],
   );
 
   return (
     <VoiceContext.Provider value={value}>
       {children}
       {/* Áudio dos participantes: montado aqui para não parar ao trocar de canal. */}
-      {room.remotePeers.map((p) => (
-        <AudioSink
-          key={p.userId}
-          peer={p}
-          speakerId={prefs.speakerId}
-          volume={prefs.outputVolume * (prefs.peerVolumes[p.userId] ?? 1)}
-        />
-      ))}
+      {room.remotePeers.map((p) => {
+        const a = prefs.peerAudio[p.userId] ?? AUDIO_DO_PARTICIPANTE_PADRAO;
+        return (
+          <RamoDoParticipante
+            key={p.userId}
+            peer={p}
+            saida={saida}
+            ganho={ganhoEfetivo(a.volume, a.muted)}
+          />
+        );
+      })}
     </VoiceContext.Provider>
   );
 }

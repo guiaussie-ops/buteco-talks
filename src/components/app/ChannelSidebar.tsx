@@ -19,8 +19,9 @@ import { useVoice } from "@/lib/voice";
 import { useAuth } from "@/lib/auth";
 import {
   ControleDeVolume,
+  SeloDeMicFechado,
   SeloDeMudo,
-  useVolumeDoParticipante,
+  useAudioDoParticipante,
 } from "@/components/app/ControleDeVolume";
 import { useVoiceRoster } from "@/hooks/useVoiceRoster";
 import { Settings, MoreVertical, Pencil, Trash2 } from "lucide-react";
@@ -85,20 +86,26 @@ function ParticipanteSentado({
   avatar,
   falando,
   ehVoce,
+  micOff,
 }: {
   userId: string;
   name: string;
   avatar: string | null | undefined;
   falando: boolean;
   ehVoce: boolean;
+  /** O microfone DELA está fechado, segundo a presença. */
+  micOff: boolean;
 }) {
-  const { percent } = useVolumeDoParticipante(userId);
+  const { muted } = useAudioDoParticipante(userId);
 
+  // Mesma regra da tampinha grande no painel: o meu mudo vence o microfone
+  // fechado dela, porque é ele que explica o silêncio se ela voltar a falar.
   const conteudo = (
     <>
       <Bottlecap name={name} src={avatar} speaking={falando} className="size-5 text-[10px]" />
       <span className="text-muted-foreground/80 truncate text-[11px]">{name}</span>
-      {!ehVoce && percent === 0 && <SeloDeMudo className="ml-auto size-3" />}
+      {!ehVoce && muted && <SeloDeMudo className="ml-auto size-3" />}
+      {!ehVoce && !muted && micOff && <SeloDeMicFechado className="ml-auto size-3" />}
     </>
   );
 
@@ -269,6 +276,12 @@ export function ChannelSidebar({
                           voiceSession.active?.channelId === c.id && !!voiceSession.speaking[userId]
                         }
                         ehVoce={userId === meuId}
+                        // Só vale para a mesa em que EU estou: a presença de
+                        // voz que carrega esse estado é a do canal conectado.
+                        micOff={
+                          voiceSession.active?.channelId === c.id &&
+                          !!voiceSession.estadosDeAudio[userId]?.micOff
+                        }
                       />
                     </li>
                   ))}

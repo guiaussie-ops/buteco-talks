@@ -42,7 +42,20 @@ type PresencaDeVoz = {
   at: number;
   video: "none" | Transmissao;
   assistindo: string[];
+  /** Meu microfone está fechado. Vira o indicador na minha tampinha para os outros. */
+  micOff: boolean;
+  /** Estou de fone mudo. Também vai para a presença: quem fala comigo merece saber. */
+  deafened: boolean;
 };
+
+/**
+ * O que os OUTROS estão publicando sobre o áudio deles.
+ *
+ * Note o que não está aqui: se eu mutei alguém. Isso é uma decisão minha sobre
+ * o meu fone, mora só no meu localStorage e não sai da minha aba — a pessoa
+ * mutada não fica sabendo, e ninguém mais na mesa é afetado.
+ */
+export type EstadoDeAudio = { micOff: boolean; deafened: boolean };
 
 type SignalPayload = {
   from: string;
@@ -98,9 +111,11 @@ export function useVoiceRoom(
   channelId: string | null,
   userId: string | null,
   prefs: MediaPrefs = MEDIA_PREFS_PADRAO,
+  /** Estado do meu fone. Entra só para ser republicado na presença. */
+  deafened = false,
 ) {
   const [connected, setConnected] = useState(false);
-  const [micOn, setMicOn] = useState(true);
+  const [micOn, setMicOnState] = useState(true);
   const [micStream, setMicStreamState] = useState<MediaStream | null>(null);
   const [remotePeers, setRemotePeers] = useState<RemotePeer[]>([]);
   /**
@@ -112,6 +127,8 @@ export function useVoiceRoom(
   const [participants, setParticipants] = useState<string[]>([]);
   /** Quem está transmitindo agora, e o quê. Não implica receber nada. */
   const [transmissoes, setTransmissoes] = useState<Record<string, Transmissao>>({});
+  /** Microfone fechado / fone mudo de cada um dos outros, lido da presença. */
+  const [estadosDeAudio, setEstadosDeAudio] = useState<Record<string, EstadoDeAudio>>({});
   /** De quem EU pedi para receber vídeo. Nasce vazio: ninguém carrega sem pedir. */
   const [assistindo, setAssistindo] = useState<string[]>([]);
   const [localVideoStream, setLocalVideoStream] = useState<MediaStream | null>(null);
@@ -154,6 +171,7 @@ export function useVoiceRoom(
   const assistindoRef = useRef<string[]>([]);
   assistindoRef.current = assistindo;
   const videoModeRef = useRef<"none" | Transmissao>("none");
+  const deafenedRef = useRef(false);
   /** Instante da entrada. Fixo, para republicar a presença não virar um diff. */
   const entradaRef = useRef(0);
 
@@ -192,6 +210,8 @@ export function useVoiceRoom(
       at: entradaRef.current,
       video: videoModeRef.current,
       assistindo: assistindoRef.current,
+      micOff: !micOnRef.current,
+      deafened: deafenedRef.current,
     };
     void chan.track(payload).catch(() => undefined);
   }, [userId]);
@@ -550,6 +570,7 @@ export function useVoiceRoom(
         // Quem transmite o quê, e quem quer o MEU vídeo. Os dois saem da mesma
         // varredura porque saem da mesma presença.
         const transmitindo: Record<string, Transmissao> = {};
+        const estados: Record<string, EstadoDeAudio> = {};
         const querem = new Set<string>();
         for (const [id, entradas] of Object.entries(state)) {
           if (id === userId) continue;
@@ -559,9 +580,14 @@ export function useVoiceRoom(
           if (!p) continue;
           if (p.video === "camera" || p.video === "screen") transmitindo[id] = p.video;
           if (p.assistindo?.includes(userId)) querem.add(id);
+          // `=== true` e não `!!`: quem está numa versão anterior do app não
+          // publica estes campos, e ausência tem que virar "não sei", que é o
+          // mesmo que "sem indicador" — nunca um mudo inventado na tampinha.
+          estados[id] = { micOff: p.micOff === true, deafened: p.deafened === true };
         }
         quemQuerMeuVideoRef.current = querem;
         setTransmissoes(transmitindo);
+        setEstadosDeAudio(estados);
         // Quem parou de transmitir (ou saiu) some da minha lista sozinho, senão
         // eu ficaria pedindo para sempre um vídeo que não existe mais.
         setAssistindo((prev) => {
@@ -635,7 +661,9 @@ export function useVoiceRoom(
     return () => {
       cancelled = true;
       setConnected(false);
-      setMicOn(true);
+      // O setter cru, e não o `setMicOn` daqui de baixo: este é o desmonte da
+      // sala, não há mais presença para publicar nem faixa para reabrir.
+      setMicOnState(true);
       micOnRef.current = true;
       peersRef.current.forEach((b) => b.pc.close());
       peersRef.current.clear();
@@ -643,6 +671,7 @@ export function useVoiceRoom(
       setRemotePeers([]);
       setParticipants([]);
       setTransmissoes({});
+      setEstadosDeAudio({});
       setAssistindo([]);
       quemQuerMeuVideoRef.current = new Set();
       // Com o grafo montado a faixa publicada é outra que não a crua; parar só
@@ -736,12 +765,33 @@ export function useVoiceRoom(
     };
   }, [prefs.echoCancellation, prefs.noiseSuppression, prefs.autoGainControl, recapturarMicrofone]);
 
-  const toggleMic = useCallback(() => {
-    const next = !micOn;
-    micOnRef.current = next;
-    micStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = next));
-    setMicOn(next);
-  }, [micOn]);
+  /**
+   * Abre e fecha o microfone na própria faixa. `enabled = false` e nada mais:
+   * tirar a faixa ou trocá-la por `null` obrigaria a renegociar com todo mundo
+   * na malha, e o outro lado veria a pessoa "sair" e "voltar" a cada mudo.
+   * Com `enabled` a faixa continua de pé mandando silêncio, ninguém renegocia,
+   * e o sinal de que estou mudo vai pela presença — que é onde estado mora.
+   */
+  const setMicOn = useCallback(
+    (ligado: boolean) => {
+      if (micOnRef.current === ligado) return;
+      micOnRef.current = ligado;
+      micStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = ligado));
+      setMicOnState(ligado);
+      publicarPresenca();
+    },
+    [publicarPresenca],
+  );
+
+  const toggleMic = useCallback(() => setMicOn(!micOnRef.current), [setMicOn]);
+
+  // O fone mudo é decidido lá em cima, no provider, mas quem publica presença é
+  // aqui. Republicar quando ele muda é o que acende o indicador nos outros.
+  useEffect(() => {
+    if (deafenedRef.current === deafened) return;
+    deafenedRef.current = deafened;
+    publicarPresenca();
+  }, [deafened, publicarPresenca]);
 
   const stopVideo = useCallback(() => {
     videoStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -795,6 +845,8 @@ export function useVoiceRoom(
     micOn,
     micStream,
     toggleMic,
+    setMicOn,
+    estadosDeAudio,
     remotePeers,
     localVideoStream,
     videoMode,

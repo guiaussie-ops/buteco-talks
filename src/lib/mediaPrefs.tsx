@@ -8,6 +8,24 @@ import {
   type ReactNode,
 } from "react";
 import { LIMIAR_MAXIMO, LIMIAR_PADRAO } from "@/lib/gateDeRuido";
+import { VOLUME_MAXIMO } from "@/lib/saidaDeAudio";
+
+/**
+ * O que você escolheu para UMA pessoa da mesa. Só para você: nada disto sai
+ * daqui, nem para a presença nem para a outra ponta.
+ *
+ * Volume e mudo são campos separados de propósito. Se "mudo" fosse só
+ * `volume = 0`, desmutar teria que chutar um valor — e chutaria 100%,
+ * jogando fora o 40% que a pessoa tinha ajustado. Separados, desmutar
+ * devolve exatamente o que estava antes.
+ */
+export type AudioDoParticipante = {
+  /** 0 a 2. Acima de 1 amplifica e pode clipar — ver VOLUME_MAXIMO. */
+  volume: number;
+  muted: boolean;
+};
+
+export const AUDIO_DO_PARTICIPANTE_PADRAO: AudioDoParticipante = { volume: 1, muted: false };
 
 export type MediaPrefs = {
   /** null = deixa o navegador escolher */
@@ -19,10 +37,10 @@ export type MediaPrefs = {
   /** volume com que você ouve a mesa (0 a 1) */
   outputVolume: number;
   /**
-   * Volume por participante (0 a 1), só atenuação: multiplica o volume de saída.
-   * Chaveado por user_id, então a escolha vale para a pessoa em qualquer mesa.
+   * Volume e mudo por participante. Chaveado por user_id, então a escolha vale
+   * para a pessoa em qualquer mesa e sobrevive a ela sair e voltar.
    */
-  peerVolumes: Record<string, number>;
+  peerAudio: Record<string, AudioDoParticipante>;
   /**
    * Filtros que o próprio navegador aplica no pipeline de captura.
    *
@@ -67,7 +85,7 @@ export const MEDIA_PREFS_PADRAO: MediaPrefs = {
   cameraId: null,
   inputGain: 1,
   outputVolume: 1,
-  peerVolumes: {},
+  peerAudio: {},
   echoCancellation: false,
   noiseSuppression: true,
   autoGainControl: true,
@@ -101,7 +119,7 @@ function ler(): MediaPrefs {
       ...salvo,
       inputGain: clamp(salvo.inputGain ?? 1, 0, 2),
       outputVolume: clamp(salvo.outputVolume ?? 1, 0, 1),
-      peerVolumes: lerPeerVolumes(salvo.peerVolumes),
+      peerAudio: lerPeerAudio(salvo),
       // `??` e não `!!`: campo ausente (preferência gravada por uma versão
       // antiga) tem que cair no padrão, não virar false na marra.
       echoCancellation: salvo.echoCancellation ?? MEDIA_PREFS_PADRAO.echoCancellation,
@@ -117,13 +135,38 @@ function ler(): MediaPrefs {
   }
 }
 
-/** Descarta entradas corrompidas em vez de deixar um NaN silenciar alguém. */
-function lerPeerVolumes(cru: unknown): Record<string, number> {
-  if (!cru || typeof cru !== "object") return {};
-  const saida: Record<string, number> = {};
-  for (const [id, v] of Object.entries(cru as Record<string, unknown>)) {
-    if (typeof v === "number" && Number.isFinite(v)) saida[id] = clamp(v, 0, 1);
+/**
+ * Descarta entradas corrompidas em vez de deixar um NaN silenciar alguém, e
+ * converte o formato antigo.
+ *
+ * Até a versão passada isto era `peerVolumes: Record<string, number>` de 0 a 1,
+ * e mudo alguém era arrastar o slider até 0 — a interface inteira testava
+ * `percent === 0`. Na conversão, esse 0 vira `muted: true` com o volume de
+ * volta em 100%: era exatamente essa a intenção de quem arrastou, e agora
+ * desmutar tem para onde voltar.
+ */
+function lerPeerAudio(salvo: Partial<MediaPrefs> & { peerVolumes?: unknown }) {
+  const saida: Record<string, AudioDoParticipante> = {};
+
+  const antigo = salvo.peerVolumes;
+  if (antigo && typeof antigo === "object") {
+    for (const [id, v] of Object.entries(antigo as Record<string, unknown>)) {
+      if (typeof v !== "number" || !Number.isFinite(v)) continue;
+      saida[id] =
+        v === 0 ? { volume: 1, muted: true } : { volume: clamp(v, 0, VOLUME_MAXIMO), muted: false };
+    }
   }
+
+  const novo = salvo.peerAudio;
+  if (novo && typeof novo === "object") {
+    for (const [id, v] of Object.entries(novo as Record<string, unknown>)) {
+      if (!v || typeof v !== "object") continue;
+      const { volume, muted } = v as Partial<AudioDoParticipante>;
+      if (typeof volume !== "number" || !Number.isFinite(volume)) continue;
+      saida[id] = { volume: clamp(volume, 0, VOLUME_MAXIMO), muted: muted === true };
+    }
+  }
+
   return saida;
 }
 
