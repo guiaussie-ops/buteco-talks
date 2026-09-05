@@ -73,6 +73,39 @@ const ICE_SERVERS: RTCConfiguration = {
 };
 
 /**
+ * Teto de banda do vídeo, por destinatário e em bits por segundo.
+ *
+ * Em malha não existe "o encoder": quem transmite para oito pessoas roda oito
+ * encoders, cada um com a sua própria fila de subida. Sem teto, o WebRTC mira
+ * a banda que ele ACHA que tem — e ele mede cada conexão isolada, sem saber
+ * que há outras sete disputando o mesmo cabo. As oito estimativas somadas
+ * passam de qualquer upload doméstico, a fila estoura, o ICE começa a perder
+ * keepalive e a conexão vai para `disconnected`. O teto é o que impede a
+ * transmissão de derrubar a si mesma.
+ *
+ * Tela é mais alta que câmera porque é onde está o detalhe que importa: texto
+ * de jogo, código, planilha. Câmera é rosto, e rosto sobrevive bem em 600k.
+ */
+const TETO_TELA_BPS = 1_500_000;
+const TETO_CAMERA_BPS = 600_000;
+
+/**
+ * Subida total que a gente se permite ocupar, dividida entre quem está
+ * assistindo. É um chute deliberadamente conservador: 6 Mbps é o que sobra num
+ * plano doméstico brasileiro razoável depois do resto da casa. Com uma pessoa
+ * assistindo o teto por conexão manda; a partir de quatro, quem manda é o
+ * orçamento.
+ */
+const ORCAMENTO_DE_SUBIDA_BPS = 6_000_000;
+
+/**
+ * Abaixo disto a tela vira sopa de blocos e não vale a pena transmitir. Se a
+ * plateia crescer tanto que o orçamento não cobre, é melhor estourar um pouco
+ * o orçamento do que mandar algo ilegível para todo mundo.
+ */
+const PISO_DE_BITRATE_BPS = 300_000;
+
+/**
  * Backoff da volta por cima: 2s, 4s, 8s, 16s, e daí em diante de 30 em 30.
  *
  * Começa curto porque a maioria dos `disconnected` é um soluço de rede que se
@@ -247,21 +280,70 @@ export function useVoiceRoom(
    * banda dele e o encoder daquela conexão nem roda. E `replaceTrack` não
    * renegocia, então entrar e sair da transmissão não sacode a mesa.
    */
+  /**
+   * Põe o teto de banda no sender de vídeo de UM peer.
+   *
+   * `setParameters` não renegocia — é a mesma razão de `replaceTrack` ser o
+   * caminho preferido aqui: o teto muda sem sacudir a mesa.
+   */
+  const aplicarTetoDeBitrate = useCallback((box: PeerBox) => {
+    const sender = box.videoSender;
+    const modo = videoModeRef.current;
+    // Sem faixa no ar não há encoder para limitar, e mexer nos parâmetros de um
+    // sender vazio só gasta chamada.
+    if (!sender || !box.videoAtual || modo === "none") return;
+
+    // O divisor é quem ASSISTE, não quem está na mesa: quem não pediu não tem
+    // encoder rodando e não ocupa subida nenhuma. Numa mesa de quinze com dois
+    // assistindo, o teto continua alto — e é o certo.
+    const plateia = Math.max(1, quemQuerMeuVideoRef.current.size);
+    const base = modo === "screen" ? TETO_TELA_BPS : TETO_CAMERA_BPS;
+    const teto = Math.max(
+      PISO_DE_BITRATE_BPS,
+      Math.min(base, Math.round(ORCAMENTO_DE_SUBIDA_BPS / plateia)),
+    );
+    /**
+     * Tela degrada em FPS, câmera degrada em resolução. Texto de jogo a 8 fps
+     * ainda se lê; o mesmo texto reamostrado para meia resolução, não. Para
+     * rosto vale o contrário, e é o padrão do navegador.
+     */
+    const degradacao: RTCDegradationPreference =
+      modo === "screen" ? "maintain-resolution" : "balanced";
+
+    const params = sender.getParameters();
+    // Antes da primeira negociação o array pode vir vazio. Inventar uma camada
+    // aqui não funciona: `setParameters` recusa mudar a QUANTIDADE de camadas,
+    // e a chamada morreria no catch sem teto nenhum. Melhor desistir agora — o
+    // handler de `connected` chama isto de novo quando houver o que limitar.
+    const camada = params.encodings?.[0];
+    if (!camada) return;
+    if (camada.maxBitrate === teto && params.degradationPreference === degradacao) return;
+    camada.maxBitrate = teto;
+    params.degradationPreference = degradacao;
+    // Recusa não é fatal: sem teto o vídeo ainda vai, só sem rédea.
+    void sender.setParameters(params).catch(() => undefined);
+  }, []);
+
   const aplicarVideoNosPeers = useCallback(() => {
     const track = videoStreamRef.current?.getVideoTracks()[0] ?? null;
     peersRef.current.forEach((box, id) => {
       const alvo = quemQuerMeuVideoRef.current.has(id) ? track : null;
-      if (box.videoAtual === alvo) return;
-      box.videoAtual = alvo;
-      if (box.videoSender) {
-        void box.videoSender.replaceTrack(alvo).catch(() => undefined);
-      } else if (alvo && videoStreamRef.current) {
-        // Só cai aqui num navegador sem addTransceiver, onde o sender não pôde
-        // nascer junto com o peer. Aqui renegocia, e tudo bem: é o caminho raro.
-        box.videoSender = box.pc.addTrack(alvo, videoStreamRef.current);
+      if (box.videoAtual !== alvo) {
+        box.videoAtual = alvo;
+        if (box.videoSender) {
+          void box.videoSender.replaceTrack(alvo).catch(() => undefined);
+        } else if (alvo && videoStreamRef.current) {
+          // Só cai aqui num navegador sem addTransceiver, onde o sender não pôde
+          // nascer junto com o peer. Aqui renegocia, e tudo bem: é o caminho raro.
+          box.videoSender = box.pc.addTrack(alvo, videoStreamRef.current);
+        }
       }
+      // Fora do `if` de propósito: o teto depende do TAMANHO da plateia, então
+      // alguém entrando ou saindo da transmissão muda a conta de todo mundo,
+      // inclusive a dos peers cuja faixa não mudou nada.
+      aplicarTetoDeBitrate(box);
     });
-  }, []);
+  }, [aplicarTetoDeBitrate]);
 
   /**
    * Prende a faixa recebida ao stream do participante e liga os avisos de
@@ -720,6 +802,10 @@ export function useVoiceRoom(
           case "connected":
             cancelarVolta(box);
             box.tentativas = 0;
+            // Agora sim há camada de codificação para limitar: antes da
+            // negociação `getParameters` costuma vir sem nenhuma, e a tentativa
+            // lá do `aplicarVideoNosPeers` desistiu no meio.
+            aplicarTetoDeBitrate(box);
             publish();
             break;
           case "disconnected":
@@ -762,7 +848,16 @@ export function useVoiceRoom(
 
       return box;
     },
-    [agendarVolta, armarFaixa, cancelarVolta, publish, recriarPeer, send, userId],
+    [
+      agendarVolta,
+      aplicarTetoDeBitrate,
+      armarFaixa,
+      cancelarVolta,
+      publish,
+      recriarPeer,
+      send,
+      userId,
+    ],
   );
 
   // Fecha o ciclo: `recriarPeer` chama `createPeer` por aqui.
@@ -1079,6 +1174,9 @@ export function useVoiceRoom(
     videoStreamRef.current = null;
     setLocalVideoStream(null);
     setVideoMode("none");
+    // O ref anda na frente do estado: quem lê o modo é o `aplicar` logo abaixo,
+    // ainda neste tique, e o efeito que sincroniza o ref só roda depois.
+    videoModeRef.current = "none";
     // replaceTrack(null) e não removeTrack: o sender continua de pé, ninguém
     // renegocia, e do outro lado a faixa fica muda na hora — que é o sinal que
     // o publish() agora lê para tirar o tile da tela. Com videoStreamRef já
@@ -1104,6 +1202,9 @@ export function useVoiceRoom(
         videoStreamRef.current = stream;
         setLocalVideoStream(stream);
         setVideoMode(mode);
+        // Mesma razão do stopVideo: o teto de banda depende de saber se isto é
+        // tela ou câmera, e quem decide isso é o ref, não o estado.
+        videoModeRef.current = mode;
 
         const track = stream.getVideoTracks()[0];
         if (track) track.onended = () => stopVideo();
