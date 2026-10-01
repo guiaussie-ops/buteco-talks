@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Laboratório de ruído — cru vs RNNoise vs GTCRN</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --fundo: #16130f;
+        --painel: #201b16;
+        --painel2: #2a231c;
+        --borda: #3d332a;
+        --texto: #f0e7dc;
+        --fraco: #a59484;
+        --ambar: #f0a848;
+        --ambar2: #e07a2c;
+        --verde: #6fcf7f;
+        --vermelho: #e8635a;
+        --azul: #6fb4e8;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--fundo);
+        color: var(--texto);
+        font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        padding: 24px 16px 80px;
+      }
+      main { max-width: 860px; margin: 0 auto; }
+      h1 { font-size: 22px; margin: 0 0 4px; }
+      h2 { font-size: 15px; margin: 0 0 10px; color: var(--ambar); letter-spacing: 0.02em; }
+      .sub { color: var(--fraco); margin: 0 0 20px; font-size: 14px; }
+      section {
+        background: var(--painel);
+        border: 1px solid var(--borda);
+        border-radius: 14px;
+        padding: 16px;
+        margin-bottom: 14px;
+      }
+      button {
+        font: inherit;
+        font-weight: 600;
+        color: var(--texto);
+        background: var(--painel2);
+        border: 1px solid var(--borda);
+        border-radius: 10px;
+        padding: 9px 15px;
+        cursor: pointer;
+      }
+      button:hover:not(:disabled) { border-color: var(--ambar); }
+      button:disabled { opacity: 0.4; cursor: not-allowed; }
+      button.principal {
+        background: linear-gradient(135deg, var(--ambar), var(--ambar2));
+        color: #241703;
+        border-color: transparent;
+        padding: 11px 22px;
+      }
+      button.parar { background: #4a2320; border-color: #6b332e; color: #ffd9d4; }
+
+      /* --- seletor de modo --- */
+      .modos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+      .modo {
+        text-align: left;
+        padding: 13px 15px;
+        line-height: 1.35;
+        position: relative;
+      }
+      .modo b { display: block; font-size: 16px; }
+      .modo span { display: block; font-size: 12px; color: var(--fraco); font-weight: 400; }
+      .modo[aria-pressed="true"] {
+        border-color: var(--ambar);
+        background: #33271a;
+        box-shadow: inset 0 0 0 1px var(--ambar);
+      }
+      .modo .tecla {
+        position: absolute; top: 8px; right: 10px;
+        font-size: 11px; color: var(--fraco); font-weight: 400;
+      }
+
+      /* --- medidores --- */
+      .medidor { margin-top: 12px; }
+      .medidor-rot {
+        display: flex; justify-content: space-between;
+        font-size: 12px; color: var(--fraco); margin-bottom: 4px;
+      }
+      .barra {
+        height: 16px; background: var(--painel2); border: 1px solid var(--borda);
+        border-radius: 999px; overflow: hidden;
+      }
+      .barra > i {
+        display: block; height: 100%; width: 0%;
+        background: linear-gradient(90deg, var(--ambar), var(--ambar2));
+        transition: width 60ms linear;
+      }
+      .barra.saida > i { background: linear-gradient(90deg, var(--verde), #3f9c55); }
+
+      /* --- linhas de controle --- */
+      .linha { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+      .linha + .linha { margin-top: 12px; }
+      label.chave { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+      input[type="range"] { flex: 1; min-width: 140px; accent-color: var(--ambar); }
+      input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--ambar); }
+
+      /* --- diagnóstico --- */
+      table.diag { width: 100%; border-collapse: collapse; font-size: 13px; }
+      table.diag td { padding: 5px 0; border-bottom: 1px solid var(--borda); }
+      table.diag td:first-child { color: var(--fraco); width: 45%; }
+      table.diag tr:last-child td { border-bottom: 0; }
+      code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12.5px; }
+
+      /* --- gravações --- */
+      .grav { display: grid; gap: 8px; margin-top: 12px; }
+      .grav-item {
+        display: flex; align-items: center; gap: 12px;
+        background: var(--painel2); border: 1px solid var(--borda);
+        border-radius: 10px; padding: 10px 13px;
+      }
+      .grav-item.tocando { border-color: var(--ambar); background: #33271a; }
+      .grav-item b { min-width: 92px; }
+      .grav-item.oculto b { color: var(--azul); }
+      .grav-item audio { flex: 1; height: 32px; }
+
+      .aviso {
+        display: flex; gap: 9px; align-items: flex-start;
+        background: #3a2a12; border: 1px solid #6b4c18; color: #ffdca8;
+        border-radius: 10px; padding: 11px 13px; font-size: 13.5px; margin-bottom: 14px;
+      }
+      .erro { background: #3d1c19; border-color: #7a332c; color: #ffcdc7; }
+      .dica { color: var(--fraco); font-size: 12.5px; margin: 8px 0 0; }
+      .oculto-de-vez { display: none !important; }
+      .pontinho { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--fraco); margin-right: 6px; }
+      .pontinho.on { background: var(--verde); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Laboratório de ruído</h1>
+      <p class="sub">
+        Cru vs RNNoise vs GTCRN, ao vivo, com o seu microfone e o seu barulho.
+        Nada daqui está ligado ao app — é uma página solta, só para decidir.
+      </p>
+
+      <div class="aviso">
+        <span>🎧</span>
+        <span>
+          <b>Põe o fone de ouvido antes de ligar o retorno.</b> Sem fone, o retorno volta
+          para o microfone e apita. E lembra: enquanto você digita, seus ouvidos escutam o
+          teclado de verdade — por isso a gravação lá embaixo é o teste que vale.
+        </span>
+      </div>
+
+      <div id="erro" class="aviso erro oculto-de-vez"></div>
+
+      <!-- ============================= captura ============================= -->
+      <section>
+        <div class="linha">
+          <button id="btComecar" class="principal">Começar</button>
+          <button id="btParar" class="parar" disabled>Parar</button>
+          <span id="estado" style="color: var(--fraco); font-size: 13.5px">
+            <span class="pontinho"></span>parado
+          </span>
+        </div>
+        <p class="dica">
+          O contexto é aberto forçando 48 kHz: o RNNoise só funciona nessa taxa e o GTCRN
+          recusa qualquer outra.
+        </p>
+      </section>
+
+      <!-- ============================== modos ============================== -->
+      <section>
+        <h2>O que você está ouvindo</h2>
+        <div class="modos">
+          <button class="modo" id="modo-cru" aria-pressed="true" data-modo="cru">
+            <span class="tecla">1</span>
+            <b>Cru</b>
+            <span>microfone sem nada</span>
+          </button>
+          <button class="modo" id="modo-rnnoise" aria-pressed="false" data-modo="rnnoise">
+            <span class="tecla">2</span>
+            <b>RNNoise</b>
+            <span>2017 · 48 kHz cheios</span>
+          </button>
+          <button class="modo" id="modo-gtcrn" aria-pressed="false" data-modo="gtcrn">
+            <span class="tecla">3</span>
+            <b>GTCRN</b>
+            <span>2024 · banda de 16 kHz</span>
+          </button>
+        </div>
+
+        <div class="medidor">
+          <div class="medidor-rot"><span>entrada (o que o microfone captou)</span><span id="numEntrada">0%</span></div>
+          <div class="barra"><i id="barEntrada"></i></div>
+        </div>
+        <div class="medidor">
+          <div class="medidor-rot"><span>saída (depois do modo selecionado)</span><span id="numSaida">0%</span></div>
+          <div class="barra saida"><i id="barSaida"></i></div>
+        </div>
+        <p class="dica">
+          Faça barulho sem falar: a barra de baixo tem que encolher em relação à de cima.
+          Depois fale: as duas têm que subir junto. Atalhos <code>1</code> <code>2</code>
+          <code>3</code> trocam de modo sem tirar a mão do teclado.
+        </p>
+      </section>
+
+      <!-- ============================= retorno ============================= -->
+      <section>
+        <h2>Retorno de voz</h2>
+        <div class="linha">
+          <label class="chave">
+            <input type="checkbox" id="chRetorno" />
+            Ouvir minha voz de volta
+          </label>
+          <input type="range" id="volRetorno" min="0" max="100" value="70" />
+          <span id="numVol" style="color: var(--fraco); font-size: 13px; min-width: 40px">70%</span>
+        </div>
+      </section>
+
+      <!-- ============================= gravação ============================ -->
+      <section>
+        <h2>Gravação comparativa — o teste que vale</h2>
+        <p class="dica" style="margin-top: 0">
+          Grava o <b>mesmo</b> áudio pelos três caminhos ao mesmo tempo. Faça o seu barulho
+          típico: fale uma frase, bata no teclado, amasse o saco de salgadinho, fale outra
+          frase. Depois escute em silêncio — é aí que a diferença aparece.
+        </p>
+        <div class="linha">
+          <button id="btGravar" class="principal" disabled>Gravar 8 s nos três</button>
+          <button id="btCego" disabled>Teste cego</button>
+          <button id="btRevelar" disabled>Revelar</button>
+          <span id="estadoGrav" style="color: var(--fraco); font-size: 13.5px"></span>
+        </div>
+        <div class="grav" id="listaGrav"></div>
+      </section>
+
+      <!-- =========================== navegador ============================ -->
+      <section>
+        <h2>Filtros do navegador na captura</h2>
+        <p class="dica" style="margin-top: 0">
+          Deixe os três desligados para o teste ser justo: com a supressão do navegador
+          ligada, o "cru" já vem limpo e não sobra ruído para o modelo cortar. Mexer aqui
+          reabre o microfone.
+        </p>
+        <div class="linha">
+          <label class="chave"><input type="checkbox" id="chNS" /> noiseSuppression</label>
+          <label class="chave"><input type="checkbox" id="chAGC" /> autoGainControl</label>
+          <label class="chave"><input type="checkbox" id="chAEC" /> echoCancellation</label>
+        </div>
+      </section>
+
+      <!-- =========================== diagnóstico ========================== -->
+      <section>
+        <h2>Diagnóstico</h2>
+        <div class="linha" style="margin-bottom: 10px">
+          <label class="chave">
+            <input type="checkbox" id="chSozinho" />
+            Rodar só o modo selecionado (medição de CPU honesta)
+          </label>
+        </div>
+        <table class="diag">
+          <tr><td>taxa do contexto</td><td id="dTaxa">—</td></tr>
+          <tr><td>SIMD no WebAssembly</td><td id="dSimd">—</td></tr>
+          <tr><td>baixado (RNNoise + GTCRN)</td><td id="dBytes">—</td></tr>
+          <tr><td>tempo até o áudio sair</td><td id="dTempo">—</td></tr>
+          <tr><td>carga da thread de áudio</td><td id="dCarga">—</td></tr>
+          <tr><td>falhas de renderização</td><td id="dFalhas">—</td></tr>
+          <tr><td>latência do modo atual</td><td id="dLatencia">—</td></tr>
+          <tr><td>filtros ativos na faixa</td><td id="dFaixa">—</td></tr>
+        </table>
+        <p class="dica">
+          A carga é do processo de áudio inteiro. Com "rodar só o modo selecionado" marcado
+          ela vira o custo real de <i>um</i> modelo — que é o número que interessa para
+          decidir sobre celular fraco.
+        </p>
+      </section>
+    </main>
+
+    <script type="module">
+      // ===================================================================
+      // Laboratório de comparação de supressão de ruído.
+      // Roda sem bundler: os worklets e os .wasm são servidos de vendor/.
+      // ===================================================================
+
+      const RNNOISE_ID = "@sapphi-red/web-noise-suppressor/rnnoise";
+      const GTCRN_ID = "@sapphi-red/web-noise-suppressor/gtcrn";
+
+      /** Atraso que cada caminho introduz, lido do código dos worklets. */
+      const LATENCIA = {
+        cru: "0 ms",
+        rnnoise: "1280 amostras ≈ 27 ms",
+        gtcrn: "768 amostras ≈ 16 ms",
+      };
+
+      const $ = (id) => document.getElementById(id);
+      const erroEl = $("erro");
+
+      const mostrarErro = (msg) => {
+        erroEl.textContent = msg;
+        erroEl.classList.remove("oculto-de-vez");
+      };
+      const limparErro = () => erroEl.classList.add("oculto-de-vez");
+
+      // ---- estado -------------------------------------------------------
+      let ctx = null;
+      let stream = null;
+      let fonte = null;
+      let mestre = null; // ganho do retorno, antes do destino
+      let cadeias = null; // { cru, rnnoise, gtcrn }
+      let modo = "cru";
+      let animando = 0;
+      let bytesBaixados = 0;
+      let capacidade = null;
+
+      const gravacoes = new Map(); // modo -> { url, blob }
+      let ordemCega = null;
+
+      // ---- detecção de SIMD (mesmo teste que o pacote usa) --------------
+      const temSimd = async () =>
+        WebAssembly.validate(
+          new Uint8Array([
+            0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8,
+            0, 65, 0, 253, 15, 253, 98, 11,
+          ]),
+        );
+
+      const baixar = async (url) => {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`falhou ao baixar ${url} (${r.status})`);
+        const b = await r.arrayBuffer();
+        bytesBaixados += b.byteLength;
+        return b;
+      };
+
+      // ---- construção de uma cadeia -------------------------------------
+      /**
+       * Cada modo tem a sua própria cadeia, alimentada pela mesma fonte:
+       *   fonte → [nó do modelo] → { analisador, ganho do retorno, destino de gravação }
+       * Todas existem ao mesmo tempo, então trocar de modo é só mexer em ganhos —
+       * instantâneo, sem remontar nada e sem perder o que você estava falando.
+       */
+      const criarCadeia = (no) => {
+        const fim = no ?? fonte;
+        if (no) fonte.connect(no);
+
+        const analisador = ctx.createAnalyser();
+        analisador.fftSize = 1024;
+        analisador.smoothingTimeConstant = 0.6;
+        fim.connect(analisador);
+
+        const ganho = ctx.createGain();
+        ganho.gain.value = 0;
+        fim.connect(ganho);
+        ganho.connect(mestre);
+
+        const destino = ctx.createMediaStreamDestination();
+        fim.connect(destino);
+
+        return { no, fim, analisador, ganho, destino, dados: new Uint8Array(1024) };
+      };
+
+      const desconectarCadeia = (c) => {
+        if (!c.no) return; // o cru é a própria fonte, não dá para desligar
+        try { fonte.disconnect(c.no); } catch {}
+        try { c.no.disconnect(); } catch {}
+        c.ligada = false;
+      };
+
+      const reconectarCadeia = (c) => {
+        if (!c.no || c.ligada !== false) return;
+        fonte.connect(c.no);
+        c.no.connect(c.analisador);
+        c.no.connect(c.ganho);
+        c.no.connect(c.destino);
+        c.ligada = true;
+      };
+
+      // ---- roteamento ---------------------------------------------------
+      const aplicarRoteamento = () => {
+        if (!ctx) return;
+        const querSozinho = $("chSozinho").checked;
+        for (const [nome, c] of Object.entries(cadeias)) {
+          const selecionado = nome === modo;
+          if (querSozinho && !selecionado) desconectarCadeia(c);
+          else reconectarCadeia(c);
+
+          const alvo = selecionado && $("chRetorno").checked ? 1 : 0;
+          c.ganho.gain.setTargetAtTime(alvo, ctx.currentTime, 0.015);
+        }
+        mestre.gain.setTargetAtTime(
+          Number($("volRetorno").value) / 100,
+          ctx.currentTime,
+          0.015,
+        );
+        $("dLatencia").textContent = LATENCIA[modo];
+      };
+
+      const trocarModo = (novo) => {
+        modo = novo;
+        for (const b of document.querySelectorAll(".modo")) {
+          b.setAttribute("aria-pressed", String(b.dataset.modo === novo));
+        }
+        aplicarRoteamento();
+      };
+
+      // ---- medidores ----------------------------------------------------
+      const RMS_CHEIO = 0.35;
+      const nivelDe = (c) => {
+        c.analisador.getByteTimeDomainData(c.dados);
+        let soma = 0;
+        for (let i = 0; i < c.dados.length; i++) {
+          const v = (c.dados[i] - 128) / 128;
+          soma += v * v;
+        }
+        return Math.min(1, Math.sqrt(soma / c.dados.length) / RMS_CHEIO);
+      };
+
+      const animar = () => {
+        animando = requestAnimationFrame(animar);
+        if (!cadeias) return;
+        const entrada = nivelDe(cadeias.cru);
+        const saida = nivelDe(cadeias[modo]);
+        $("barEntrada").style.width = `${Math.round(entrada * 100)}%`;
+        $("barSaida").style.width = `${Math.round(saida * 100)}%`;
+        $("numEntrada").textContent = `${Math.round(entrada * 100)}%`;
+        $("numSaida").textContent = `${Math.round(saida * 100)}%`;
+      };
+
+      // ---- ligar --------------------------------------------------------
+      const constraintsDeAudio = () => ({
+        echoCancellation: $("chAEC").checked,
+        noiseSuppression: $("chNS").checked,
+        autoGainControl: $("chAGC").checked,
+        channelCount: 1,
+      });
+
+      const comecar = async () => {
+        limparErro();
+        await parar();
+        const t0 = performance.now();
+        try {
+          // 48 kHz na marra: o RNNoise foi treinado nessa taxa e o GTCRN
+          // recusa qualquer coisa que não seja 16k ou 48k.
+          ctx = new AudioContext({ sampleRate: 48000, latencyHint: "interactive" });
+          if (ctx.sampleRate !== 48000) {
+            throw new Error(
+              `o navegador abriu o contexto a ${ctx.sampleRate} Hz e não a 48000 — ` +
+                `os dois modelos precisam de 48 kHz.`,
+            );
+          }
+
+          stream = await navigator.mediaDevices.getUserMedia({ audio: constraintsDeAudio() });
+
+          bytesBaixados = 0;
+          const simd = await temSimd();
+          const [binRnn, binGtcrn] = await Promise.all([
+            baixar(simd ? "vendor/rnnoise_simd.wasm" : "vendor/rnnoise.wasm"),
+            baixar("vendor/gtcrn.wasm"),
+          ]);
+          await Promise.all([
+            ctx.audioWorklet.addModule("vendor/rnnoiseWorklet.js"),
+            ctx.audioWorklet.addModule("vendor/gtcrnWorklet.js"),
+          ]);
+
+          fonte = ctx.createMediaStreamSource(stream);
+          mestre = ctx.createGain();
+          mestre.gain.value = Number($("volRetorno").value) / 100;
+          mestre.connect(ctx.destination);
+
+          const opcoes = (bin) => ({
+            numberOfInputs: 1,
+            numberOfOutputs: 1,
+            outputChannelCount: [1],
+            processorOptions: { maxChannels: 1, wasmBinary: bin },
+          });
+          const noRnn = new AudioWorkletNode(ctx, RNNOISE_ID, opcoes(binRnn));
+          const noGtcrn = new AudioWorkletNode(ctx, GTCRN_ID, opcoes(binGtcrn));
+          for (const no of [noRnn, noGtcrn]) {
+            no.onprocessorerror = () =>
+              mostrarErro("Um dos modelos quebrou dentro do worklet. Veja o console.");
+          }
+
+          cadeias = {
+            cru: criarCadeia(null),
+            rnnoise: criarCadeia(noRnn),
+            gtcrn: criarCadeia(noGtcrn),
+          };
+          for (const c of Object.values(cadeias)) c.ligada = true;
+
+          await ctx.resume();
+
+          // Medição de carga, quando o navegador oferece (Chrome).
+          if (ctx.renderCapacity) {
+            capacidade = ctx.renderCapacity;
+            capacidade.onupdate = (e) => {
+              $("dCarga").textContent =
+                `média ${(e.averageLoad * 100).toFixed(1)}% · pico ${(e.peakLoad * 100).toFixed(1)}%`;
+              $("dFalhas").textContent =
+                e.underrunRatio > 0
+                  ? `${(e.underrunRatio * 100).toFixed(2)}% dos blocos — está faltando CPU`
+                  : "nenhuma";
+            };
+            capacidade.start({ updateInterval: 1 });
+          } else {
+            $("dCarga").textContent = "este navegador não expõe renderCapacity";
+            $("dFalhas").textContent = "—";
+          }
+
+          const faixa = stream.getAudioTracks()[0];
+          const cfg = faixa?.getSettings() ?? {};
+          $("dTaxa").textContent = `${ctx.sampleRate} Hz`;
+          $("dSimd").textContent = simd ? "sim (binário SIMD)" : "não (binário simples)";
+          $("dBytes").textContent = `${(bytesBaixados / 1024).toFixed(0)} KB`;
+          $("dTempo").textContent = `${Math.round(performance.now() - t0)} ms`;
+          $("dFaixa").textContent =
+            `NS ${cfg.noiseSuppression ?? "?"} · AGC ${cfg.autoGainControl ?? "?"} · ` +
+            `AEC ${cfg.echoCancellation ?? "?"}`;
+
+          trocarModo(modo);
+          aplicarRoteamento();
+          animar();
+
+          $("btComecar").disabled = true;
+          $("btParar").disabled = false;
+
+          // Os worklets compilam o WASM lá dentro, de forma assíncrona, e até
+          // terminarem devolvem silêncio. São poucas centenas de ms, mas sem
+          // avisar parece que o modelo comeu tudo.
+          $("estado").innerHTML = '<span class="pontinho"></span>aquecendo os modelos…';
+          setTimeout(() => {
+            if (!ctx) return;
+            $("btGravar").disabled = false;
+            $("estado").innerHTML = '<span class="pontinho on"></span>rodando';
+          }, 600);
+        } catch (e) {
+          console.error(e);
+          mostrarErro(
+            e?.name === "NotAllowedError"
+              ? "Você negou o microfone. Libere a permissão na barra do navegador e tente de novo."
+              : `Não consegui começar: ${e?.message ?? e}`,
+          );
+          await parar();
+        }
+      };
+
+      const parar = async () => {
+        cancelAnimationFrame(animando);
+        try { capacidade?.stop(); } catch {}
+        capacidade = null;
+        if (cadeias) {
+          for (const c of Object.values(cadeias)) c.no?.port.postMessage("destroy");
+        }
+        cadeias = null;
+        fonte = null;
+        mestre = null;
+        stream?.getTracks().forEach((t) => t.stop());
+        stream = null;
+        if (ctx) { try { await ctx.close(); } catch {} }
+        ctx = null;
+        $("btComecar").disabled = false;
+        $("btParar").disabled = true;
+        $("btGravar").disabled = true;
+        $("barEntrada").style.width = "0%";
+        $("barSaida").style.width = "0%";
+        $("estado").innerHTML = '<span class="pontinho"></span>parado';
+        $("dCarga").textContent = "—";
+      };
+
+      // ---- gravação -----------------------------------------------------
+      const DURACAO_MS = 8000;
+
+      const gravar = async () => {
+        if (!ctx) return;
+        // Gravar exige os três rodando ao mesmo tempo: é o que garante que o
+        // áudio comparado é exatamente o mesmo nos três caminhos.
+        const eraSozinho = $("chSozinho").checked;
+        $("chSozinho").checked = false;
+        aplicarRoteamento();
+
+        $("btGravar").disabled = true;
+        $("btCego").disabled = true;
+        $("btRevelar").disabled = true;
+        for (const g of gravacoes.values()) URL.revokeObjectURL(g.url);
+        gravacoes.clear();
+        $("listaGrav").innerHTML = "";
+        ordemCega = null;
+
+        const tipo = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : "";
+        const gravadores = Object.entries(cadeias).map(([nome, c]) => {
+          const pedacos = [];
+          const mr = new MediaRecorder(c.destino.stream, tipo ? { mimeType: tipo } : undefined);
+          mr.ondataavailable = (e) => e.data.size && pedacos.push(e.data);
+          mr.onstop = () => {
+            const blob = new Blob(pedacos, { type: tipo || "audio/webm" });
+            gravacoes.set(nome, { blob, url: URL.createObjectURL(blob) });
+            if (gravacoes.size === 3) montarGravacoes();
+          };
+          return mr;
+        });
+
+        gravadores.forEach((mr) => mr.start());
+        const fim = Date.now() + DURACAO_MS;
+        const relogio = setInterval(() => {
+          const s = Math.max(0, Math.ceil((fim - Date.now()) / 1000));
+          $("estadoGrav").textContent = `gravando… ${s}s — faz barulho!`;
+        }, 100);
+
+        setTimeout(() => {
+          clearInterval(relogio);
+          gravadores.forEach((mr) => mr.state !== "inactive" && mr.stop());
+          $("estadoGrav").textContent = "";
+          $("btGravar").disabled = false;
+          $("chSozinho").checked = eraSozinho;
+          aplicarRoteamento();
+        }, DURACAO_MS);
+      };
+
+      const ROTULOS = { cru: "Cru", rnnoise: "RNNoise", gtcrn: "GTCRN" };
+
+      const montarGravacoes = (cego = false) => {
+        const lista = $("listaGrav");
+        lista.innerHTML = "";
+        const ordem = cego
+          ? [...gravacoes.keys()].sort(() => Math.random() - 0.5)
+          : ["cru", "rnnoise", "gtcrn"];
+        ordemCega = cego ? ordem : null;
+
+        ordem.forEach((nome, i) => {
+          const g = gravacoes.get(nome);
+          const div = document.createElement("div");
+          div.className = "grav-item" + (cego ? " oculto" : "");
+          const b = document.createElement("b");
+          b.textContent = cego ? `Amostra ${i + 1}` : ROTULOS[nome];
+          const audio = document.createElement("audio");
+          audio.controls = true;
+          audio.src = g.url;
+          audio.onplay = () => {
+            for (const el of lista.querySelectorAll(".grav-item")) el.classList.remove("tocando");
+            div.classList.add("tocando");
+          };
+          const baixar = document.createElement("button");
+          baixar.textContent = "salvar";
+          baixar.onclick = () => {
+            const a = document.createElement("a");
+            a.href = g.url;
+            a.download = `ruido-${nome}.webm`;
+            a.click();
+          };
+          div.append(b, audio, baixar);
+          lista.append(div);
+        });
+
+        $("btCego").disabled = false;
+        $("btRevelar").disabled = !cego;
+      };
+
+      // ---- eventos ------------------------------------------------------
+      $("btComecar").onclick = () => void comecar();
+      $("btParar").onclick = () => void parar();
+      $("btGravar").onclick = () => void gravar();
+      $("btCego").onclick = () => montarGravacoes(true);
+      $("btRevelar").onclick = () => {
+        if (!ordemCega) return;
+        const itens = [...$("listaGrav").querySelectorAll(".grav-item b")];
+        ordemCega.forEach((nome, i) => {
+          itens[i].textContent = `${i + 1}º — ${ROTULOS[nome]}`;
+        });
+        $("btRevelar").disabled = true;
+      };
+
+      for (const b of document.querySelectorAll(".modo")) {
+        b.onclick = () => trocarModo(b.dataset.modo);
+      }
+      addEventListener("keydown", (e) => {
+        if (e.target.matches("input, textarea")) return;
+        const mapa = { 1: "cru", 2: "rnnoise", 3: "gtcrn" };
+        if (mapa[e.key]) trocarModo(mapa[e.key]);
+      });
+
+      $("chRetorno").onchange = aplicarRoteamento;
+      $("chSozinho").onchange = aplicarRoteamento;
+      $("volRetorno").oninput = () => {
+        $("numVol").textContent = `${$("volRetorno").value}%`;
+        aplicarRoteamento();
+      };
+      // Trocar filtro do navegador só vale reabrindo a captura.
+      for (const id of ["chNS", "chAGC", "chAEC"]) {
+        $(id).onchange = () => { if (ctx) void comecar(); };
+      }
+
+      addEventListener("pagehide", () => void parar());
+    </script>
+  </body>
+</html>
