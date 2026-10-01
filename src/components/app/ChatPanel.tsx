@@ -1,127 +1,259 @@
-import { useEffect, useRef, useState } from "react";
-import { Hash, SendHorizontal } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Bottlecap } from "@/components/Bottlecap";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { Hash, ImagePlus } from "lucide-react";
 import { toast } from "sonner";
+import { Bottlecap } from "@/components/Bottlecap";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Mensagem } from "@/components/app/chat/Mensagem";
+import { Compositor, type Membro } from "@/components/app/chat/Compositor";
+import { useChatChannel } from "@/hooks/useChatChannel";
+import {
+  depoisDe,
+  imagemValida,
+  isGrouped,
+  menciona,
+  mesmoDia,
+  resumoDeReacoes,
+  rotuloDoDia,
+  textoDigitando,
+  type Message,
+  type Reacao,
+} from "@/lib/chat";
 
-export type Message = {
-  id: string;
-  channel_id: string;
-  user_id: string;
-  content: string;
-  created_at: string;
-};
+export type { Message } from "@/lib/chat";
 
 type Props = {
   channelId: string;
   channelName: string;
+  serverId: string;
   userId: string;
   names: Record<string, string>;
   avatars: Record<string, string | null>;
+  usernames: Record<string, string>;
+  /** Dono e admins apagam mensagem dos outros. */
+  canManage: boolean;
 };
 
-function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+/** Distância do fim em que a lista ainda conta como "colada embaixo". */
+const COLADO_PX = 120;
+
+function Separador({ children, destaque }: { children: React.ReactNode; destaque?: boolean }) {
+  return (
+    <div className="my-4 flex items-center gap-3" role="separator">
+      <div className={destaque ? "bg-primary/70 h-px flex-1" : "bg-border h-px flex-1"} />
+      <span
+        className={
+          destaque
+            ? "text-primary text-[11px] font-semibold tracking-[0.14em] uppercase"
+            : "text-muted-foreground text-[11px] font-medium"
+        }
+      >
+        {children}
+      </span>
+      <div className={destaque ? "bg-primary/70 h-px flex-1" : "bg-border h-px flex-1"} />
+    </div>
+  );
 }
 
-function formatDay(iso: string) {
-  const d = new Date(iso);
-  const today = new Date();
-  const sameDay = d.toDateString() === today.toDateString();
-  return sameDay ? "hoje" : d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
-}
+export function ChatPanel({
+  channelId,
+  channelName,
+  serverId,
+  userId,
+  names,
+  avatars,
+  usernames,
+  canManage,
+}: Props) {
+  const chat = useChatChannel({ channelId, serverId, userId });
+  const { messages } = chat;
 
-/** Agrupa mensagens seguidas da mesma pessoa (janela de 5 min). */
-function isGrouped(prev: Message | undefined, msg: Message) {
-  if (!prev || prev.user_id !== msg.user_id) return false;
-  return new Date(msg.created_at).getTime() - new Date(prev.created_at).getTime() < 5 * 60 * 1000;
-}
+  const [editandoId, setEditandoId] = useState<string | null>(null);
+  const [resposta, setResposta] = useState<Message | null>(null);
+  const [imagem, setImagem] = useState<File | null>(null);
+  const [apagando, setApagando] = useState<Message | null>(null);
+  const [arrastando, setArrastando] = useState(false);
+  const [carregandoAntigas, setCarregandoAntigas] = useState(false);
 
-export function ChatPanel({ channelId, channelName, userId, names, avatars }: Props) {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const divisorRef = useRef<HTMLDivElement | null>(null);
+  const coladoRef = useRef(true);
+  const posicionouRef = useRef(false);
+  const ultimoIdRef = useRef<string | null>(null);
+  const ajusteRef = useRef<{ altura: number; topo: number } | null>(null);
 
-  useEffect(() => {
-    let active = true;
-    void supabase
-      .from("messages")
-      .select("id, channel_id, user_id, content, created_at")
-      .eq("channel_id", channelId)
-      .order("created_at", { ascending: true })
-      .limit(200)
-      .then(({ data }) => {
-        if (active) setMessages((data as Message[]) ?? []);
-      });
+  const porId = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
 
-    const channel = supabase
-      .channel(`messages:${channelId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages",
-          filter: `channel_id=eq.${channelId}`,
-        },
-        (payload) => {
-          const msg = payload.new as Message;
-          setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "DELETE",
-          schema: "public",
-          table: "messages",
-          filter: `channel_id=eq.${channelId}`,
-        },
-        (payload) => {
-          const old = payload.old as { id: string };
-          setMessages((prev) => prev.filter((m) => m.id !== old.id));
-        },
-      )
-      .subscribe();
+  const reacoesPorMensagem = useMemo(() => {
+    const mapa = new Map<string, Reacao[]>();
+    chat.reacoes.forEach((r) => {
+      const lista = mapa.get(r.message_id);
+      if (lista) lista.push(r);
+      else mapa.set(r.message_id, [r]);
+    });
+    return new Map([...mapa].map(([id, lista]) => [id, resumoDeReacoes(lista)]));
+  }, [chat.reacoes]);
 
-    return () => {
-      active = false;
-      void supabase.removeChannel(channel);
-    };
-  }, [channelId]);
+  const divisorIdx = useMemo(
+    () => messages.findIndex((m) => depoisDe(m, chat.limiar, userId)),
+    [messages, chat.limiar, userId],
+  );
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  const membros = useMemo<Membro[]>(
+    () =>
+      Object.entries(usernames)
+        .filter(([id]) => id !== userId)
+        .map(([id, username]) => ({
+          userId: id,
+          username,
+          name: names[id] ?? username,
+          avatar: avatars[id] ?? null,
+        })),
+    [usernames, names, avatars, userId],
+  );
 
-  const send = async () => {
-    const content = draft.trim();
-    if (!content) return;
-    setSending(true);
-    const { error } = await supabase
-      .from("messages")
-      .insert({ channel_id: channelId, user_id: userId, content });
-    setSending(false);
-    if (error) {
-      toast.error("Não rolou mandar a resenha. Tenta de novo.");
+  // -------------------------------------------------------------------------
+  // Rolagem
+  // -------------------------------------------------------------------------
+
+  const irProFim = useCallback(() => {
+    const el = scrollerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = scrollerRef.current;
+    if (!el || !chat.carregado) return;
+
+    // Primeira vez: abre na linha de "novas" se houver, senão no fim.
+    if (!posicionouRef.current) {
+      posicionouRef.current = true;
+      ultimoIdRef.current = messages.at(-1)?.id ?? null;
+      if (divisorRef.current) divisorRef.current.scrollIntoView({ block: "center" });
+      else irProFim();
       return;
     }
-    setDraft("");
+
+    // Carregou antigas em cima: segura a tela onde ela estava.
+    if (ajusteRef.current) {
+      el.scrollTop = el.scrollHeight - ajusteRef.current.altura + ajusteRef.current.topo;
+      ajusteRef.current = null;
+      return;
+    }
+
+    const ultima = messages.at(-1);
+    if (ultima && ultima.id !== ultimoIdRef.current) {
+      ultimoIdRef.current = ultima.id;
+      // Chegou mensagem embaixo: acompanha se eu já estava no fim ou se fui eu
+      // que mandei. Quem subiu para ler o histórico não é puxado de volta.
+      if (coladoRef.current || ultima.user_id === userId) irProFim();
+    }
+  }, [messages, chat.carregado, userId, irProFim]);
+
+  const aoRolar = async () => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    coladoRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < COLADO_PX;
+    if (el.scrollTop < 80 && chat.temMais && !carregandoAntigas) {
+      setCarregandoAntigas(true);
+      ajusteRef.current = { altura: el.scrollHeight, topo: el.scrollTop };
+      const quantas = await chat.carregarAntigas();
+      if (quantas === 0) ajusteRef.current = null;
+      setCarregandoAntigas(false);
+    }
   };
 
+  // Imagem que termina de carregar empurra a lista; quem está no fim continua no fim.
+  const aoCarregarImagem = useCallback(() => {
+    if (coladoRef.current) irProFim();
+  }, [irProFim]);
+
+  const irPara = (id: string) => {
+    const el = document.getElementById(`msg-${id}`);
+    if (!el) {
+      toast.info("Essa mensagem é antiga demais, sobe a conversa até ela.");
+      return;
+    }
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.classList.add("bg-primary/15");
+    window.setTimeout(() => el.classList.remove("bg-primary/15"), 1500);
+  };
+
+  // Mensagem apagada (por mim em outra aba, ou por um admin) não pode ficar
+  // presa em edição nem como alvo de resposta.
+  useEffect(() => {
+    if (editandoId && !porId.has(editandoId)) setEditandoId(null);
+    if (resposta && !porId.has(resposta.id)) setResposta(null);
+  }, [porId, editandoId, resposta]);
+
+  // -------------------------------------------------------------------------
+  // Ações
+  // -------------------------------------------------------------------------
+
+  const enviar = async (texto: string) => {
+    const ok = await chat.enviar({ texto, replyTo: resposta?.id ?? null, imagem });
+    if (ok) {
+      setResposta(null);
+      setImagem(null);
+    }
+    return ok;
+  };
+
+  const editarUltima = () => {
+    const minha = [...messages].reverse().find((m) => m.user_id === userId && m.content);
+    if (minha) setEditandoId(minha.id);
+  };
+
+  const soltar = (e: React.DragEvent) => {
+    e.preventDefault();
+    setArrastando(false);
+    const arquivo = [...e.dataTransfer.files].find((f) => f.type.startsWith("image/"));
+    if (arquivo && imagemValida(arquivo)) setImagem(arquivo);
+  };
+
+  const digitandoTexto = textoDigitando(chat.digitando.map((id) => names[id] ?? "Alguém"));
+
   return (
-    <section className="flex h-full min-w-0 flex-1 flex-col">
+    <section
+      className="relative flex h-full min-w-0 flex-1 flex-col"
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        setArrastando(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setArrastando(false);
+      }}
+      onDrop={soltar}
+    >
       <header className="border-border flex h-14 shrink-0 items-center gap-2 border-b px-5">
         <Hash className="text-primary size-4" />
         <h1 className="font-display text-base tracking-wide">{channelName}</h1>
         <span className="text-muted-foreground ml-2 text-xs">mesa de texto</span>
       </header>
 
-      <div className="scrollbar-thin flex-1 overflow-y-auto px-5 py-6">
-        {messages.length === 0 && (
+      <div
+        ref={scrollerRef}
+        onScroll={() => void aoRolar()}
+        className="scrollbar-thin flex-1 overflow-y-auto px-4 py-4"
+      >
+        {chat.carregado && messages.length === 0 && (
           <div className="flex h-full min-h-60 flex-col items-center justify-center gap-2 text-center">
             <Bottlecap name={channelName} className="size-12" />
             <p className="text-muted-foreground max-w-xs text-sm">
@@ -129,66 +261,118 @@ export function ChatPanel({ channelId, channelName, userId, names, avatars }: Pr
             </p>
           </div>
         )}
-        <div className="space-y-0.5">
+
+        {chat.carregado && messages.length > 0 && !chat.temMais && (
+          <div className="mb-6 flex flex-col items-start gap-2 px-1 pt-6">
+            <Bottlecap name={channelName} className="size-12" />
+            <h2 className="font-display text-2xl tracking-wide">Começo de #{channelName}</h2>
+            <p className="text-muted-foreground text-sm">Daqui pra trás não tem mais resenha.</p>
+          </div>
+        )}
+        {carregandoAntigas && (
+          <p className="text-muted-foreground py-2 text-center text-xs">Puxando as antigas…</p>
+        )}
+
+        <div>
           {messages.map((m, i) => {
-            const name = names[m.user_id] ?? "Alguém";
-            const grouped = isGrouped(messages[i - 1], m);
-            if (grouped) {
-              return (
-                <div
-                  key={m.id}
-                  className="hover:bg-surface/50 group rounded-md py-0.5 pr-2 pl-[52px]"
-                >
-                  <span className="text-muted-foreground mr-2 hidden w-8 text-right text-[10px] group-hover:inline-block">
-                    {formatTime(m.created_at)}
-                  </span>
-                  <span className="text-foreground/90 text-sm break-words whitespace-pre-wrap">
-                    {m.content}
-                  </span>
-                </div>
-              );
-            }
+            const anterior = messages[i - 1];
+            const novoDia = !anterior || !mesmoDia(anterior.created_at, m.created_at);
+            const ehDivisor = i === divisorIdx;
+            const citada = m.reply_to
+              ? (porId.get(m.reply_to) ?? chat.citadas[m.reply_to])
+              : undefined;
             return (
-              <div key={m.id} className="mt-4 flex gap-3">
-                <Bottlecap name={name} src={avatars[m.user_id]} className="mt-0.5" />
-                <div className="min-w-0">
-                  <p className="flex items-baseline gap-2">
-                    <span className="text-sm font-semibold">{name}</span>
-                    <span className="text-muted-foreground text-[11px]">
-                      {formatDay(m.created_at)} às {formatTime(m.created_at)}
-                    </span>
-                  </p>
-                  <p className="text-foreground/90 text-sm break-words whitespace-pre-wrap">
-                    {m.content}
-                  </p>
-                </div>
-              </div>
+              <Fragment key={m.id}>
+                {novoDia && <Separador>{rotuloDoDia(m.created_at)}</Separador>}
+                {ehDivisor && (
+                  <div ref={divisorRef}>
+                    <Separador destaque>Novas mensagens</Separador>
+                  </div>
+                )}
+                <Mensagem
+                  msg={m}
+                  agrupada={!ehDivisor && isGrouped(anterior, m)}
+                  userId={userId}
+                  names={names}
+                  avatars={avatars}
+                  usernames={usernames}
+                  citada={citada}
+                  urlImagem={m.image_path ? chat.urls[m.image_path] : undefined}
+                  reacoes={reacoesPorMensagem.get(m.id) ?? []}
+                  mencionaMe={m.user_id !== userId && menciona(m.content, userId, usernames)}
+                  podeApagar={m.user_id === userId || canManage}
+                  editando={editandoId === m.id}
+                  onComecarEdicao={() => setEditandoId(m.id)}
+                  onSalvarEdicao={async (texto) => {
+                    // Apagar todo o texto de uma mensagem sem imagem é apagar a mensagem.
+                    if (!texto && !m.image_path) {
+                      setEditandoId(null);
+                      setApagando(m);
+                      return false;
+                    }
+                    return chat.editar(m.id, texto);
+                  }}
+                  onCancelarEdicao={() => setEditandoId(null)}
+                  onResponder={() => setResposta(m)}
+                  onApagar={(semPerguntar) => (semPerguntar ? void chat.apagar(m) : setApagando(m))}
+                  onReagir={(emoji) => void chat.alternarReacao(m.id, emoji)}
+                  onIrPara={irPara}
+                  onImagemCarregou={aoCarregarImagem}
+                />
+              </Fragment>
             );
           })}
         </div>
-        <div ref={bottomRef} />
       </div>
 
-      <div className="border-border shrink-0 border-t p-4">
-        <div className="bg-surface wood-texture flex items-end gap-2 rounded-xl p-2">
-          <Textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void send();
-              }
-            }}
-            rows={1}
-            placeholder={`Solta a resenha em #${channelName}`}
-            className="max-h-40 min-h-10 resize-none border-0 bg-transparent focus-visible:ring-0"
-          />
-          <Button size="icon" onClick={() => void send()} disabled={sending || !draft.trim()}>
-            <SendHorizontal className="size-4" />
-          </Button>
+      <Compositor
+        channelName={channelName}
+        membros={membros}
+        resposta={resposta ? { msg: resposta, nome: names[resposta.user_id] ?? "Alguém" } : null}
+        onCancelarResposta={() => setResposta(null)}
+        imagem={imagem}
+        onImagem={setImagem}
+        onEnviar={enviar}
+        onDigitando={chat.avisarDigitando}
+        onEditarUltima={editarUltima}
+        digitandoTexto={digitandoTexto}
+      />
+
+      {arrastando && (
+        <div className="bg-background/80 border-primary pointer-events-none absolute inset-3 z-30 flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed">
+          <ImagePlus className="text-primary size-10" />
+          <p className="font-display text-lg tracking-wide">Solta a imagem em #{channelName}</p>
         </div>
-      </div>
+      )}
+
+      <AlertDialog open={!!apagando} onOpenChange={(aberto) => !aberto && setApagando(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apagar mensagem?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Some pra todo mundo da mesa, junto com as reações. Dica: Shift + clique na lixeira
+              apaga sem perguntar.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {apagando && (
+            <div className="bg-surface text-foreground/90 max-h-32 overflow-hidden rounded-lg p-3 text-sm break-words whitespace-pre-wrap">
+              {apagando.content || <span className="text-muted-foreground italic">imagem</span>}
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (apagando) void chat.apagar(apagando);
+                setApagando(null);
+              }}
+            >
+              Apagar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

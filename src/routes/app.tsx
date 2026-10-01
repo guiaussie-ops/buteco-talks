@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { useVoice } from "@/lib/voice";
+import { useNaoLidas } from "@/hooks/useNaoLidas";
 import { ServerRail, type ServerItem } from "@/components/app/ServerRail";
 import { ChannelSidebar, type Channel } from "@/components/app/ChannelSidebar";
 import { ChatPanel } from "@/components/app/ChatPanel";
@@ -119,6 +120,7 @@ function AppPage() {
     queryFn: async (): Promise<{
       names: Record<string, string>;
       avatars: Record<string, string | null>;
+      usernames: Record<string, string>;
     }> => {
       const { data: members, error } = await supabase
         .from("server_members")
@@ -126,23 +128,32 @@ function AppPage() {
         .eq("server_id", activeServerId!);
       if (error) throw error;
       const ids = (members ?? []).map((m) => m.user_id);
-      if (ids.length === 0) return { names: {}, avatars: {} };
+      if (ids.length === 0) return { names: {}, avatars: {}, usernames: {} };
       const { data: profiles } = await supabase
         .from("profiles")
         .select("id, display_name, username, avatar_url")
         .in("id", ids);
       const names: Record<string, string> = {};
       const avatars: Record<string, string | null> = {};
+      const usernames: Record<string, string> = {};
       (profiles ?? []).forEach((p) => {
         names[p.id] = p.display_name || p.username;
         avatars[p.id] = p.avatar_url;
+        usernames[p.id] = p.username;
       });
-      return { names, avatars };
+      return { names, avatars, usernames };
     },
   });
 
   const names = membersQuery.data?.names ?? {};
   const avatars = membersQuery.data?.avatars ?? {};
+  const usernames = membersQuery.data?.usernames ?? {};
+
+  const naoLidas = useNaoLidas(
+    activeServerId,
+    uid,
+    activeChannel?.kind === "text" ? activeChannel.id : null,
+  );
 
   const createServer = useMutation({
     mutationFn: async (name: string) => {
@@ -332,6 +343,7 @@ function AppPage() {
             onSignOut={() => void signOut()}
             serverId={activeServer.id}
             names={names}
+            naoLidas={naoLidas}
             onOpenVoiceRoom={(channelId) => {
               const c = channels.find((ch) => ch.id === channelId);
               if (c) setActiveChannel(c);
@@ -358,9 +370,12 @@ function AppPage() {
                 key={activeChannel.id}
                 channelId={activeChannel.id}
                 channelName={activeChannel.name}
+                serverId={activeServer.id}
                 userId={uid!}
                 names={names}
                 avatars={avatars}
+                usernames={usernames}
+                canManage={canManage}
               />
             )
           ) : (

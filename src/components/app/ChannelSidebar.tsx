@@ -24,6 +24,7 @@ import {
   useAudioDoParticipante,
 } from "@/components/app/ControleDeVolume";
 import { useVoiceRoster } from "@/hooks/useVoiceRoster";
+import type { NaoLidas } from "@/hooks/useNaoLidas";
 import { Settings, MoreVertical, Pencil, Trash2 } from "lucide-react";
 import {
   DropdownMenu,
@@ -64,6 +65,8 @@ type Props = {
   onOpenVoiceRoom: (channelId: string) => void;
   serverId: string;
   names: Record<string, string>;
+  /** Não lidas e menções por mesa de texto. */
+  naoLidas: NaoLidas;
   canManage: boolean;
   onOpenSettings: () => void;
   onRenameChannel: (channelId: string, name: string) => Promise<void>;
@@ -138,6 +141,7 @@ export function ChannelSidebar({
   onOpenVoiceRoom,
   serverId,
   names,
+  naoLidas,
   canManage,
   onOpenSettings,
   onRenameChannel,
@@ -184,22 +188,45 @@ export function ChannelSidebar({
       </p>
       {list.map((c) => {
         const seated = roster[c.id] ?? [];
+        // A mesa aberta nunca acende: o que chega nela já está sendo lido.
+        const pendente = activeChannelId === c.id ? undefined : naoLidas[c.id];
+        const temNovas = !!pendente && pendente.naoLidas > 0;
+        const mencoes = pendente?.mencoes ?? 0;
         return (
           <div key={c.id}>
             <ContextMenu>
               <ContextMenuTrigger disabled={!canManage} asChild>
                 <div className="group/mesa relative">
+                  {temNovas && (
+                    <span
+                      aria-hidden
+                      className="bg-foreground absolute top-1/2 -left-2 h-2 w-1 -translate-y-1/2 rounded-r-full"
+                    />
+                  )}
                   <button
                     onClick={() => onSelect(c)}
                     className={cn(
                       "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors",
                       activeChannelId === c.id
                         ? "bg-surface-2 text-primary"
-                        : "text-muted-foreground hover:bg-surface-2/60 hover:text-foreground",
+                        : temNovas
+                          ? "text-foreground hover:bg-surface-2/60 font-semibold"
+                          : "text-muted-foreground hover:bg-surface-2/60 hover:text-foreground",
                     )}
                   >
                     <Icon className="size-4 shrink-0" />
                     <span className="truncate">{c.name}</span>
+                    {mencoes > 0 && (
+                      <span
+                        title={`${mencoes} ${mencoes === 1 ? "menção" : "menções"}`}
+                        className={cn(
+                          "bg-destructive text-destructive-foreground ml-auto min-w-[18px] shrink-0 rounded-full px-1.5 text-center text-[10px] leading-[18px] font-bold tabular-nums",
+                          canManage && "group-hover/mesa:opacity-0",
+                        )}
+                      >
+                        {mencoes > 99 ? "99+" : mencoes}
+                      </span>
+                    )}
                     {c.kind === "voice" && seated.length > 0 && (
                       <span
                         className={cn(

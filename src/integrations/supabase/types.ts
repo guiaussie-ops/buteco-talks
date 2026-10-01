@@ -49,29 +49,110 @@ export type Database = {
           },
         ]
       }
+      channel_reads: {
+        Row: {
+          channel_id: string
+          last_read_at: string
+          user_id: string
+        }
+        Insert: {
+          channel_id: string
+          last_read_at?: string
+          user_id: string
+        }
+        Update: {
+          channel_id?: string
+          last_read_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channel_reads_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "channels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      message_reactions: {
+        Row: {
+          channel_id: string
+          created_at: string
+          emoji: string
+          message_id: string
+          user_id: string
+        }
+        Insert: {
+          channel_id: string
+          created_at?: string
+          emoji: string
+          message_id: string
+          user_id: string
+        }
+        Update: {
+          channel_id?: string
+          created_at?: string
+          emoji?: string
+          message_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_reactions_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "channels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_reactions_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           channel_id: string
           content: string
           created_at: string
+          edited_at: string | null
           id: string
+          image_path: string | null
+          reply_to: string | null
           user_id: string
         }
         Insert: {
           channel_id: string
           content: string
           created_at?: string
+          edited_at?: string | null
           id?: string
+          image_path?: string | null
+          reply_to?: string | null
           user_id: string
         }
         Update: {
           channel_id?: string
           content?: string
           created_at?: string
+          edited_at?: string | null
           id?: string
+          image_path?: string | null
+          reply_to?: string | null
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "messages_reply_to_fkey"
+            columns: ["reply_to"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "messages_channel_id_fkey"
             columns: ["channel_id"]
@@ -227,6 +308,11 @@ export type Database = {
         Returns: boolean
       }
       join_server_by_code: { Args: { _code: string }; Returns: Json }
+      marcar_lida: { Args: { _channel_id: string }; Returns: string }
+      nao_lidas: {
+        Args: { _server_id: string }
+        Returns: { channel_id: string; mencoes: number; nao_lidas: number }[]
+      }
       regenerate_invite_code: { Args: { _server_id: string }; Returns: string }
       shares_server_with: {
         Args: { _me: string; _other: string }
