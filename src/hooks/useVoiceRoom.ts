@@ -380,6 +380,30 @@ export function useVoiceRoom(
   );
 
   /**
+   * Repesca a faixa de vídeo que já está no receiver e a prende de volta ao
+   * stream da pessoa. É o mesmo movimento do `assistir`, isolado aqui porque a
+   * reconstrução do peer precisa dele pelo mesmo motivo: `replaceTrack` do
+   * outro lado não dispara `ontrack`, e um peer recriado começa com o stream
+   * remoto zerado. Sem isto, quem estava assistindo quando a conexão caiu
+   * ficava com `assistindo` ligado e nenhuma faixa — o botão dizia "assistindo"
+   * e a tela ficava vazia até um clique em parar e assistir de novo.
+   *
+   * Idempotente: `armarFaixa` não duplica a faixa que já está no stream, então
+   * chamar a cada `connected` não custa nada quando o `ontrack` já resolveu.
+   */
+  const repescarVideo = useCallback(
+    (remoteId: string) => {
+      if (!assistindoRef.current.includes(remoteId)) return;
+      const faixa = peersRef.current
+        .get(remoteId)
+        ?.pc.getReceivers()
+        .find((r) => r.track?.kind === "video")?.track;
+      if (faixa) armarFaixa(remoteId, faixa);
+    },
+    [armarFaixa],
+  );
+
+  /**
    * Solta o vídeo que estou RECEBENDO de alguém, sem encostar no áudio dela.
    *
    * Esperar o outro lado não funciona, e é isto que deixava o botão "Parar de
@@ -420,14 +444,10 @@ export function useVoiceRoom(
         // ainda dentro deste clique.
         assistindoRef.current = [...assistindoRef.current, remoteId];
       }
-      const faixa = peersRef.current
-        .get(remoteId)
-        ?.pc.getReceivers()
-        .find((r) => r.track?.kind === "video")?.track;
-      if (faixa) armarFaixa(remoteId, faixa);
+      repescarVideo(remoteId);
       setAssistindo((prev) => (prev.includes(remoteId) ? prev : [...prev, remoteId]));
     },
-    [armarFaixa],
+    [repescarVideo],
   );
 
   /**
@@ -806,6 +826,9 @@ export function useVoiceRoom(
             // negociação `getParameters` costuma vir sem nenhuma, e a tentativa
             // lá do `aplicarVideoNosPeers` desistiu no meio.
             aplicarTetoDeBitrate(box);
+            // Peer novo, receivers novos: se eu já estava assistindo antes da
+            // queda, a faixa que voltou está aqui e ninguém mais a prenderia.
+            repescarVideo(remoteId);
             publish();
             break;
           case "disconnected":
@@ -838,6 +861,9 @@ export function useVoiceRoom(
         if (estado === "connected" || estado === "completed") {
           cancelarVolta(box);
           box.tentativas = 0;
+          // Mesma repesca pela porta do ICE: no Safari e no Firefox é por aqui
+          // que a volta é percebida, e às vezes só por aqui.
+          repescarVideo(remoteId);
         } else if (estado === "disconnected") {
           agendarVolta(box, remoteId);
         } else if (estado === "failed") {
@@ -855,6 +881,7 @@ export function useVoiceRoom(
       cancelarVolta,
       publish,
       recriarPeer,
+      repescarVideo,
       send,
       userId,
     ],
