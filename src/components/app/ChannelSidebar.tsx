@@ -6,6 +6,7 @@ import {
   FolderInput,
   FolderPlus,
   Hash,
+  LayoutGrid,
   LogOut,
   Plus,
   ShieldAlert,
@@ -39,7 +40,6 @@ import {
   SeloDeMudo,
   useAudioDoParticipante,
 } from "@/components/app/ControleDeVolume";
-import { useVoiceRoster } from "@/hooks/useVoiceRoster";
 import type { NaoLidas } from "@/hooks/useNaoLidas";
 import {
   arrumacaoDe,
@@ -121,6 +121,10 @@ type Props = {
   names: Record<string, string>;
   /** Não lidas e menções por mesa de texto. */
   naoLidas: NaoLidas;
+  /** Quem está sentado em cada mesa de voz (o salão usa o mesmo, por isso vem de fora). */
+  roster: Record<string, string[]>;
+  /** Volta para a planta do salão. */
+  onOpenSalao: () => void;
   canManage: boolean;
   onOpenSettings: () => void;
   onRenameChannel: (channelId: string, name: string) => Promise<void>;
@@ -227,6 +231,8 @@ export function ChannelSidebar({
   serverId,
   names,
   naoLidas,
+  roster,
+  onOpenSalao,
   canManage,
   onOpenSettings,
   onRenameChannel,
@@ -256,17 +262,11 @@ export function ChannelSidebar({
   } | null>(null);
   const [apagandoCategoria, setApagandoCategoria] = useState<Categoria | null>(null);
 
-  const voice = channels.filter((c) => c.kind === "voice");
   const blocos = useMemo(() => montarBlocos(categorias, channels), [categorias, channels]);
 
   const voiceSession = useVoice();
   const { session } = useAuth();
   const meuId = session?.user.id ?? null;
-  const roster = useVoiceRoster(
-    serverId,
-    voice.map((c) => c.id),
-    voiceSession.active?.channelId ?? null,
-  );
 
   const submit = async () => {
     if (!name.trim()) return;
@@ -650,6 +650,13 @@ export function ChannelSidebar({
           onJoin={onJoinServer}
         />
         <div className="ml-auto flex shrink-0 items-center gap-2.5">
+          <button
+            onClick={onOpenSalao}
+            title="Ver o salão"
+            className="text-muted-foreground hover:text-primary"
+          >
+            <LayoutGrid className="size-4" />
+          </button>
           <button
             onClick={onOpenMembros}
             title="Quem senta aqui"

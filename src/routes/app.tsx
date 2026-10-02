@@ -16,6 +16,8 @@ import { ChatPanel } from "@/components/app/ChatPanel";
 import { VoicePanel } from "@/components/app/VoicePanel";
 import { TelaCheia } from "@/components/app/TelaCheia";
 import { NaTelaAgora } from "@/components/app/NaTelaAgora";
+import { Salao } from "@/components/app/Salao";
+import { useVoiceRoster } from "@/hooks/useVoiceRoster";
 import { ServerSettingsDialog } from "@/components/app/ServerSettingsDialog";
 import { AccountSettingsDialog } from "@/components/app/AccountSettingsDialog";
 import { Bottlecap } from "@/components/Bottlecap";
@@ -142,17 +144,21 @@ function AppPage() {
   });
   const categorias = useMemo(() => categoriasQuery.data ?? [], [categoriasQuery.data]);
 
+  // Quem está sentado em cada mesa de voz. Um só para a barra e o salão: dois
+  // seriam duas assinaturas iguais do Realtime.
+  const idsDeVoz = useMemo(
+    () => channels.filter((c) => c.kind === "voice").map((c) => c.id),
+    [channels],
+  );
+  const roster = useVoiceRoster(activeServerId, idsDeVoz, voice.active?.channelId ?? null);
+
   useEffect(() => {
-    if (!activeServerId) return;
-    // Mesa apagada por outra pessoa enquanto eu estava nela também conta como
-    // "sem mesa": cai na primeira de texto.
-    const sumiu =
-      channelsQuery.isSuccess &&
-      !!activeChannel &&
-      !channels.some((c) => c.id === activeChannel.id);
-    if (activeChannel && activeChannel.server_id === activeServerId && !sumiu) return;
-    const first = channels.find((c) => c.kind === "text") ?? channels[0] ?? null;
-    setActiveChannel(first);
+    if (!activeServerId || !activeChannel) return;
+    // Sem mesa aberta, a tela é o salão: é a porta de entrada do buteco. Cai
+    // nele também quem estava numa mesa de outro buteco ou numa mesa que outra
+    // pessoa apagou.
+    const sumiu = channelsQuery.isSuccess && !channels.some((c) => c.id === activeChannel.id);
+    if (activeChannel.server_id !== activeServerId || sumiu) setActiveChannel(null);
   }, [channels, channelsQuery.isSuccess, activeServerId, activeChannel]);
 
   // O objeto guardado em activeChannel envelhece quando alguém renomeia a mesa;
@@ -455,6 +461,18 @@ function AppPage() {
     toast.success("Mesa apagada.");
   };
 
+  const entrarNaMesa = (c: Channel) => {
+    // Escolher uma mesa é querer vê-la: a tela cheia de uma transmissão volta
+    // para a miniatura (o som continua).
+    voice.sairDaTelaCheia();
+    setActiveChannel(c);
+    // Entrar na mesa de voz é uma acao explicita; mudar de canal de texto
+    // depois disso nao derruba a conexao.
+    if (c.kind === "voice" && activeServer) {
+      voice.join({ channelId: c.id, channelName: c.name, serverId: activeServer.id });
+    }
+  };
+
   if (loading || !session || !profile) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -485,13 +503,11 @@ function AppPage() {
             onApagarCategoria={apagarCategoria}
             onOpenMembros={() => setMembrosOpen(true)}
             activeChannelId={activeChannel?.id ?? null}
-            onSelect={(c) => {
-              setActiveChannel(c);
-              // Entrar na mesa de voz é uma acao explicita; mudar de canal de texto
-              // depois disso nao derruba a conexao.
-              if (c.kind === "voice") {
-                voice.join({ channelId: c.id, channelName: c.name, serverId: activeServer.id });
-              }
+            onSelect={entrarNaMesa}
+            roster={roster}
+            onOpenSalao={() => {
+              voice.sairDaTelaCheia();
+              setActiveChannel(null);
             }}
             isOwner={isOwner}
             canManage={canManage}
@@ -530,8 +546,7 @@ function AppPage() {
                 avatars={avatars}
                 onLeave={() => {
                   voice.leave();
-                  const text = channels.find((c) => c.kind === "text");
-                  setActiveChannel(text ?? null);
+                  setActiveChannel(null);
                 }}
                 onPuxarCadeira={() =>
                   voice.join({
@@ -555,9 +570,15 @@ function AppPage() {
               />
             )
           ) : (
-            <div className="text-muted-foreground flex flex-1 items-center justify-center text-sm">
-              Escolha uma mesa
-            </div>
+            <Salao
+              channels={channels}
+              categorias={categorias}
+              roster={roster}
+              naoLidas={naoLidas}
+              names={names}
+              avatars={avatars}
+              onEntrar={entrarNaMesa}
+            />
           )}
           <NaTelaAgora names={names} avatars={avatars} isAdult={isAdult} />
         </>

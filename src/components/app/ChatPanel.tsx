@@ -7,9 +7,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { Hash, ImagePlus } from "lucide-react";
+import { ImagePlus } from "lucide-react";
 import { toast } from "sonner";
 import { Bottlecap } from "@/components/Bottlecap";
+import { MiniMesa } from "@/components/app/Mesas";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -243,7 +244,7 @@ export function ChatPanel({
       onDrop={soltar}
     >
       <header className="border-border flex h-14 shrink-0 items-center gap-2 border-b px-5">
-        <Hash className="text-primary size-4" />
+        <MiniMesa tipo="text" />
         <h1 className="font-display text-base tracking-wide">{channelName}</h1>
         <span className="text-muted-foreground ml-2 text-xs">mesa de texto</span>
       </header>
