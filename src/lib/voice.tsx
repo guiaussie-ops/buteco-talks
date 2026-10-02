@@ -51,12 +51,20 @@ type VoiceContextValue = {
   assistir: (userId: string) => void;
   pararDeAssistir: (userId: string) => void;
   /**
-   * A transmissão em foco: a que vai para a tela grande e a ÚNICA cujo áudio
-   * toca. As outras que você assiste seguem passando, sem som. `null` quando
-   * você não está assistindo ninguém.
+   * A transmissão com som: a ÚNICA cujo áudio toca. As outras que você
+   * assiste seguem passando em miniatura, mudas. `null` até você escolher uma.
    */
   foco: string | null;
-  focar: (userId: string) => void;
+  /** O foco está na tela cheia, no centro, em vez de na miniatura da direita. */
+  telaCheia: boolean;
+  /** Assiste (se ainda não assistia) e passa a ouvir esta, na miniatura. */
+  ouvir: (userId: string) => void;
+  /** Assiste, ouve e leva para o centro da tela. */
+  abrirEmTelaCheia: (userId: string) => void;
+  /** Devolve a da tela cheia para a miniatura, sem tirar o som. */
+  sairDaTelaCheia: () => void;
+  /** Ninguém com som: todas as miniaturas mudas. */
+  silenciarTelas: () => void;
   speaking: Record<string, boolean>;
   participantCount: number;
   /** Microfone fechado / fone mudo de cada um dos OUTROS, vindo da presenca. */
@@ -346,15 +354,41 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   }, [activeChannelId, userId]);
 
   /**
-   * Foco escolhido por último. O foco de verdade é DERIVADO: se a escolhida
-   * saiu do ar ou eu parei de assistir, cai na primeira que eu ainda assisto,
-   * sem efeito nem estado extra para ficar dessincronizado.
+   * Transmissão escolhida para ter som. O foco de verdade é DERIVADO: se a
+   * escolhida saiu do ar ou eu parei de assistir, o foco some sozinho, sem
+   * efeito nem estado extra para ficar dessincronizado. E não cai em outra:
+   * som de transmissão só toca quando a pessoa escolhe.
    */
   const [focoEscolhido, setFocoEscolhido] = useState<string | null>(null);
-  const assistiveis = room.assistindo.filter((id) => id in room.transmissoes);
+  const [telaCheiaPedida, setTelaCheiaPedida] = useState(false);
   const foco =
-    focoEscolhido && assistiveis.includes(focoEscolhido) ? focoEscolhido : (assistiveis[0] ?? null);
-  const focar = useCallback((id: string) => setFocoEscolhido(id), []);
+    focoEscolhido && room.assistindo.includes(focoEscolhido) && focoEscolhido in room.transmissoes
+      ? focoEscolhido
+      : null;
+  const telaCheia = telaCheiaPedida && foco !== null;
+
+  const { assistir } = room;
+  const ouvir = useCallback(
+    (id: string) => {
+      assistir(id);
+      setFocoEscolhido(id);
+      setTelaCheiaPedida(false);
+    },
+    [assistir],
+  );
+  const abrirEmTelaCheia = useCallback(
+    (id: string) => {
+      assistir(id);
+      setFocoEscolhido(id);
+      setTelaCheiaPedida(true);
+    },
+    [assistir],
+  );
+  const sairDaTelaCheia = useCallback(() => setTelaCheiaPedida(false), []);
+  const silenciarTelas = useCallback(() => {
+    setFocoEscolhido(null);
+    setTelaCheiaPedida(false);
+  }, []);
 
   const speaking = useSpeaking([
     ...(userId && room.micOn ? [{ id: userId, stream: room.micStream }] : []),
@@ -482,7 +516,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       assistir: room.assistir,
       pararDeAssistir: room.pararDeAssistir,
       foco,
-      focar,
+      telaCheia,
+      ouvir,
+      abrirEmTelaCheia,
+      sairDaTelaCheia,
+      silenciarTelas,
       speaking,
       participantCount: room.participantCount,
       estadosDeAudio: room.estadosDeAudio,
@@ -500,7 +538,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       active,
       room,
       foco,
-      focar,
+      telaCheia,
+      ouvir,
+      abrirEmTelaCheia,
+      sairDaTelaCheia,
+      silenciarTelas,
       speaking,
       prefs.peerAudio,
       setPeerVolume,

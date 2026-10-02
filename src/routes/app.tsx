@@ -14,6 +14,8 @@ import type { ServerItem } from "@/components/app/Letreiro";
 import { ChannelSidebar, type Channel } from "@/components/app/ChannelSidebar";
 import { ChatPanel } from "@/components/app/ChatPanel";
 import { VoicePanel } from "@/components/app/VoicePanel";
+import { TelaCheia } from "@/components/app/TelaCheia";
+import { NaTelaAgora } from "@/components/app/NaTelaAgora";
 import { ServerSettingsDialog } from "@/components/app/ServerSettingsDialog";
 import { AccountSettingsDialog } from "@/components/app/AccountSettingsDialog";
 import { Bottlecap } from "@/components/Bottlecap";
@@ -512,7 +514,11 @@ function AppPage() {
               if (c) setActiveChannel(c);
             }}
           />
-          {activeChannel ? (
+          {/* A transmissão em tela cheia toma o centro de qualquer mesa; voltar
+              pra miniatura devolve a mesa que estava aberta. */}
+          {voice.telaCheia ? (
+            <TelaCheia names={names} />
+          ) : activeChannel ? (
             activeChannel.kind === "voice" ? (
               <VoicePanel
                 key={activeChannel.id}
@@ -527,6 +533,13 @@ function AppPage() {
                   const text = channels.find((c) => c.kind === "text");
                   setActiveChannel(text ?? null);
                 }}
+                onPuxarCadeira={() =>
+                  voice.join({
+                    channelId: activeChannel.id,
+                    channelName: canalAtivo?.name ?? activeChannel.name,
+                    serverId: activeServer.id,
+                  })
+                }
               />
             ) : (
               <ChatPanel
@@ -546,6 +559,7 @@ function AppPage() {
               Escolha uma mesa
             </div>
           )}
+          <NaTelaAgora names={names} avatars={avatars} isAdult={isAdult} />
         </>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
