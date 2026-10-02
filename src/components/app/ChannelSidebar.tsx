@@ -28,6 +28,8 @@ import {
 } from "@/components/ui/dialog";
 import { Bottlecap } from "@/components/Bottlecap";
 import { InviteDialog } from "@/components/app/InviteDialog";
+import { Letreiro, type ServerItem } from "@/components/app/Letreiro";
+import { MiniMesa } from "@/components/app/Mesas";
 import { VoiceBar } from "@/components/app/VoiceBar";
 import { useVoice } from "@/lib/voice";
 import { useAuth } from "@/lib/auth";
@@ -89,6 +91,11 @@ export type Channel = {
 
 type Props = {
   serverName: string;
+  /** Os butecos da pessoa, para o letreiro trocar de um para outro. */
+  servers: ServerItem[];
+  onSelectServer: (id: string) => void;
+  onCreateServer: () => void;
+  onJoinServer: () => void;
   inviteCode: string | null;
   channels: Channel[];
   categorias: Categoria[];
@@ -127,10 +134,10 @@ type Props = {
 };
 
 /**
- * Uma pessoa na lista da mesa. A linha inteira é o gatilho do volume, não só a
- * tampinha: com 20px ela é alvo pequeno demais para o dedo no celular.
+ * Uma tampinha sentada na mesa de voz, na fileira embaixo da miniatura. O nome
+ * vai no título e para o leitor de tela; o clique abre o volume da pessoa.
  */
-function ParticipanteSentado({
+function TampinhaSentada({
   userId,
   name,
   avatar,
@@ -150,26 +157,38 @@ function ParticipanteSentado({
 
   // Mesma regra da tampinha grande no painel: o meu mudo vence o microfone
   // fechado dela, porque é ele que explica o silêncio se ela voltar a falar.
-  const conteudo = (
-    <>
-      <Bottlecap name={name} src={avatar} speaking={falando} className="size-5 text-[10px]" />
-      <span className="text-muted-foreground/80 truncate text-[11px]">{name}</span>
-      {!ehVoce && muted && <SeloDeMudo className="ml-auto size-3" />}
-      {!ehVoce && !muted && micOff && <SeloDeMicFechado className="ml-auto size-3" />}
-    </>
+  const selo = ehVoce ? null : muted ? (
+    <SeloDeMudo className="size-2.5" />
+  ) : micOff ? (
+    <SeloDeMicFechado className="size-2.5" />
+  ) : null;
+
+  const tampinha = (
+    <span className="relative block">
+      <Bottlecap
+        name={name}
+        src={avatar}
+        speaking={falando}
+        className={cn(
+          "size-7 text-[11px]",
+          ehVoce && "ring-foreground/70 ring-2 ring-offset-1 ring-offset-transparent",
+        )}
+      />
+      {selo && (
+        <span className="bg-background/90 absolute -right-1 -bottom-1 rounded-full p-0.5">
+          {selo}
+        </span>
+      )}
+      <span className="sr-only">{ehVoce ? `${name} (você)` : name}</span>
+    </span>
   );
 
-  // Ninguém se escuta na mesa, então a própria linha não abre controle nenhum.
-  if (ehVoce) return <div className="flex items-center gap-1.5 px-1 py-0.5">{conteudo}</div>;
+  // Ninguém se escuta na mesa, então a própria tampinha não abre controle nenhum.
+  if (ehVoce) return <span title={`${name} (você)`}>{tampinha}</span>;
 
   return (
-    <ControleDeVolume
-      userId={userId}
-      name={name}
-      align="start"
-      className="hover:bg-surface-2/60 flex w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-left transition-colors"
-    >
-      {conteudo}
+    <ControleDeVolume userId={userId} name={name} align="start" className="rounded-full">
+      <span title={name}>{tampinha}</span>
     </ControleDeVolume>
   );
 }
@@ -185,6 +204,10 @@ const mesmoAlvo = (a: Alvo | null, b: Alvo) => !!a && a.tipo === b.tipo && a.id 
 
 export function ChannelSidebar({
   serverName,
+  servers,
+  onSelectServer,
+  onCreateServer,
+  onJoinServer,
   inviteCode,
   channels,
   categorias,
@@ -322,7 +345,7 @@ export function ChannelSidebar({
 
   const renderMesa = (c: Channel, bloco: Bloco<Channel>) => {
     const seated = roster[c.id] ?? [];
-    const Icon = c.kind === "voice" ? Volume2 : Hash;
+    const nomesSentados = seated.map((id) => names[id] ?? "Participante");
     // A mesa aberta nunca acende: o que chega nela já está sendo lido.
     const pendente = activeChannelId === c.id ? undefined : naoLidas[c.id];
     const temNovas = !!pendente && pendente.naoLidas > 0;
@@ -384,15 +407,21 @@ export function ChannelSidebar({
               <button
                 onClick={() => onSelect(c)}
                 className={cn(
-                  "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors",
+                  "flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm transition-colors",
                   activeChannelId === c.id
-                    ? "bg-surface-2 text-primary"
+                    ? "bg-primary/15 text-foreground shadow-[inset_3px_0_0_var(--color-primary)]"
                     : temNovas
                       ? "text-foreground hover:bg-surface-2/60 font-semibold"
                       : "text-muted-foreground hover:bg-surface-2/60 hover:text-foreground",
                 )}
               >
-                <Icon className="size-4 shrink-0" />
+                <MiniMesa
+                  tipo={c.kind === "voice" ? "voice" : "text"}
+                  sentados={nomesSentados}
+                  apagada={
+                    c.kind === "voice" ? seated.length === 0 : !temNovas && activeChannelId !== c.id
+                  }
+                />
                 <span className="truncate">{c.name}</span>
                 {mencoes > 0 && (
                   <span
@@ -403,16 +432,6 @@ export function ChannelSidebar({
                     )}
                   >
                     {mencoes > 99 ? "99+" : mencoes}
-                  </span>
-                )}
-                {c.kind === "voice" && seated.length > 0 && (
-                  <span
-                    className={cn(
-                      "text-muted-foreground ml-auto shrink-0 text-[10px] tabular-nums",
-                      canManage && "group-hover/mesa:opacity-0",
-                    )}
-                  >
-                    {seated.length}
                   </span>
                 )}
               </button>
@@ -457,15 +476,15 @@ export function ChannelSidebar({
           <ContextMenuContent className="w-40">{acoes(ContextMenuItem)}</ContextMenuContent>
         </ContextMenu>
 
-        {/* quem está na mesa agora — visível pra todo mundo do buteco */}
+        {/* quem está sentado agora — visível pra todo mundo do buteco */}
         {c.kind === "voice" && seated.length > 0 && (
-          <ul className="mt-0.5 mb-1 ml-4 flex flex-col gap-1 border-l border-border/60 pl-3">
+          <ul className="mt-1 mb-1.5 flex flex-wrap gap-1.5 pl-[50px]">
             {seated
               .map((userId) => ({ userId, name: names[userId] ?? "Participante" }))
               .sort((a, b) => a.name.localeCompare(b.name))
               .map(({ userId, name }) => (
                 <li key={userId}>
-                  <ParticipanteSentado
+                  <TampinhaSentada
                     userId={userId}
                     name={name}
                     avatar={avatars[userId]}
@@ -621,9 +640,15 @@ export function ChannelSidebar({
   };
 
   return (
-    <aside className="wood-texture border-border flex h-full w-60 shrink-0 flex-col border-r">
-      <div className="border-border flex h-14 items-center justify-between gap-2 border-b px-4">
-        <h2 className="font-display truncate text-lg tracking-wide">{serverName}</h2>
+    <aside className="wood-texture border-border flex h-full w-64 shrink-0 flex-col border-r">
+      <div className="border-border bg-rail flex h-14 items-center justify-between gap-2 border-b px-3">
+        <Letreiro
+          servers={servers}
+          activeId={serverId}
+          onSelect={onSelectServer}
+          onCreate={onCreateServer}
+          onJoin={onJoinServer}
+        />
         <div className="ml-auto flex shrink-0 items-center gap-2.5">
           <button
             onClick={onOpenMembros}

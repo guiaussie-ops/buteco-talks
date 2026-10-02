@@ -44,6 +44,11 @@
   --color-surface-2: var(--surface-2);
   --color-neon: var(--neon);
   --color-neon-foreground: var(--neon-foreground);
+  --color-mesa: var(--mesa);
+  --color-mesa-borda: var(--mesa-borda);
+  --color-papel: var(--papel);
+  --color-papel-tinta: var(--papel-tinta);
+  --color-papel-linha: var(--papel-linha);
   --color-bottle: var(--bottle);
   --color-bottle-foreground: var(--bottle-foreground);
   --color-online: var(--online);
@@ -91,6 +96,13 @@
   /* neon de bar */
   --neon: oklch(0.687 0.198 33);
   --neon-foreground: oklch(0.15 0.03 40);
+
+  /* tampo de mesa de madeira e o papel da comanda que fica em cima dela */
+  --mesa: oklch(0.42 0.075 55);
+  --mesa-borda: oklch(0.29 0.055 55);
+  --papel: oklch(0.93 0.035 85);
+  --papel-tinta: oklch(0.29 0.04 65);
+  --papel-linha: oklch(0.78 0.05 80);
 
   --secondary: oklch(0.232 0.022 62);
   --secondary-foreground: oklch(0.926 0.028 84);
@@ -199,6 +211,14 @@
       transparent 1px 7px
     ),
     var(--gradient-wood);
+}
+
+/* Piso de tábuas visto de cima: a planta do salão e o fundo da barra de mesas. */
+@utility piso-de-madeira {
+  background-color: oklch(0.3 0.05 58);
+  background-image:
+    repeating-linear-gradient(90deg, rgb(0 0 0 / 0.22) 0 2px, transparent 2px 120px),
+    repeating-linear-gradient(0deg, oklch(0.3 0.05 58) 0 38px, oklch(0.27 0.047 58) 38px 40px);
 }
 
 @utility glow-ring {

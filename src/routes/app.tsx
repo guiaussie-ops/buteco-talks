@@ -10,7 +10,7 @@ import { useButecoAoVivo } from "@/hooks/useButecoAoVivo";
 import { MembrosDialog } from "@/components/app/MembrosDialog";
 import { PESO, cargoDe } from "@/lib/cargos";
 import type { Arrumacao, Categoria } from "@/lib/organizacao";
-import { ServerRail, type ServerItem } from "@/components/app/ServerRail";
+import type { ServerItem } from "@/components/app/Letreiro";
 import { ChannelSidebar, type Channel } from "@/components/app/ChannelSidebar";
 import { ChatPanel } from "@/components/app/ChatPanel";
 import { VoicePanel } from "@/components/app/VoicePanel";
@@ -463,21 +463,17 @@ function AppPage() {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <ServerRail
-        servers={servers}
-        activeId={activeServerId}
-        onSelect={(id) => {
-          setActiveServerId(id);
-          setActiveChannel(null);
-        }}
-        onCreate={() => setCreateOpen(true)}
-        onJoin={() => setJoinOpen(true)}
-      />
-
       {activeServer ? (
         <>
           <ChannelSidebar
             serverName={activeServer.name}
+            servers={servers}
+            onSelectServer={(id) => {
+              setActiveServerId(id);
+              setActiveChannel(null);
+            }}
+            onCreateServer={() => setCreateOpen(true)}
+            onJoinServer={() => setJoinOpen(true)}
             inviteCode={activeServer.invite_code}
             channels={channels}
             categorias={categorias}

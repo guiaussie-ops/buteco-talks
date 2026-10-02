@@ -1,11 +1,5 @@
 import { cn } from "@/lib/utils";
-
-/** Cor determinística por apelido — cada pessoa tem sua tampinha. */
-function hueFor(name: string) {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
-  return h;
-}
+import { corDaTampinha } from "@/lib/tampinha";
 
 type Props = {
   name: string;
@@ -25,9 +19,7 @@ type Props = {
  * Quem subiu foto aparece com ela, recortada dentro do mesmo serrilhado.
  */
 export function Bottlecap({ name, className, speaking, src }: Props) {
-  const hue = hueFor(name || "?");
-  const cap = `oklch(0.66 0.14 ${hue})`;
-  const capDark = `oklch(0.46 0.12 ${hue})`;
+  const { cap, capDark } = corDaTampinha(name);
   const initial = (name || "?").trim().slice(0, 1).toUpperCase();
 
   return (
