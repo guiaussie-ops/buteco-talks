@@ -215,17 +215,24 @@ function AppPage() {
         .from("server_members")
         .insert({ server_id: serverId, user_id: uid!, role: "owner" });
       if (memberError) throw memberError;
-      // Já nasce com as duas categorias de sempre, que dá para renomear e arrumar.
-      const texto = crypto.randomUUID();
-      const voz = crypto.randomUUID();
-      const { error: categoriaError } = await supabase.from("channel_categories").insert([
-        { id: texto, server_id: serverId, name: "Mesas de texto", position: 0 },
-        { id: voz, server_id: serverId, name: "Mesas de voz", position: 1 },
-      ]);
+      // Uma categoria só, com as duas mesas juntas. Categoria é assunto, não
+      // tipo de mesa: o texto e a voz de um mesmo assunto moram lado a lado,
+      // como no Discord. Nomes como "Mesas de texto" sugeriam uma separação
+      // por tipo que o app não faz.
+      const mesas = crypto.randomUUID();
+      const { error: categoriaError } = await supabase
+        .from("channel_categories")
+        .insert({ id: mesas, server_id: serverId, name: "Mesas", position: 0 });
       if (categoriaError) throw categoriaError;
       const { error: channelError } = await supabase.from("channels").insert([
-        { server_id: serverId, name: "geral", kind: "text", category_id: texto, position: 0 },
-        { server_id: serverId, name: "sala-de-tela", kind: "voice", category_id: voz, position: 1 },
+        { server_id: serverId, name: "geral", kind: "text", category_id: mesas, position: 0 },
+        {
+          server_id: serverId,
+          name: "sala-de-tela",
+          kind: "voice",
+          category_id: mesas,
+          position: 1,
+        },
       ]);
       if (channelError) throw channelError;
       return serverId;
