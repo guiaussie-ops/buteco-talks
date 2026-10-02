@@ -34,6 +34,7 @@ import { MiniMesa } from "@/components/app/Mesas";
 import { VoiceBar } from "@/components/app/VoiceBar";
 import { useVoice } from "@/lib/voice";
 import { useAuth } from "@/lib/auth";
+import { usePerfil } from "@/lib/perfil";
 import {
   ControleDeVolume,
   SeloDeMicFechado,
@@ -267,6 +268,7 @@ export function ChannelSidebar({
   const voiceSession = useVoice();
   const { session } = useAuth();
   const meuId = session?.user.id ?? null;
+  const { abrirPerfil } = usePerfil();
 
   const submit = async () => {
     if (!name.trim()) return;
@@ -731,8 +733,8 @@ export function ChannelSidebar({
 
       <div className="border-border bg-rail flex items-center gap-2 border-t px-3 py-2.5">
         <button
-          onClick={onOpenAccount}
-          title="Configurações da conta"
+          onClick={() => (meuId ? abrirPerfil(meuId) : onOpenAccount())}
+          title="Meu perfil"
           className="hover:bg-surface-2/60 -mx-1 flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-0.5 text-left transition-colors"
         >
           <Bottlecap name={displayName} src={avatarUrl} className="size-9" />

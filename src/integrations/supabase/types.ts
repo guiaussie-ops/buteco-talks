@@ -266,6 +266,45 @@ export type Database = {
           },
         ]
       }
+      recados: {
+        Row: {
+          created_at: string
+          de_id: string
+          id: string
+          para_id: string
+          texto: string
+        }
+        Insert: {
+          created_at?: string
+          de_id: string
+          id?: string
+          para_id: string
+          texto: string
+        }
+        Update: {
+          created_at?: string
+          de_id?: string
+          id?: string
+          para_id?: string
+          texto?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recados_de_id_fkey"
+            columns: ["de_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recados_para_id_fkey"
+            columns: ["para_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       server_bans: {
         Row: {
           banned_by: string | null
@@ -363,6 +402,45 @@ export type Database = {
         }
         Relationships: []
       }
+      votos_de_perfil: {
+        Row: {
+          de_id: string
+          nivel: number
+          para_id: string
+          quesito: string
+          updated_at: string
+        }
+        Insert: {
+          de_id: string
+          nivel: number
+          para_id: string
+          quesito: string
+          updated_at?: string
+        }
+        Update: {
+          de_id?: string
+          nivel?: number
+          para_id?: string
+          quesito?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "votos_de_perfil_de_id_fkey"
+            columns: ["de_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "votos_de_perfil_para_id_fkey"
+            columns: ["para_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       voice_participants: {
         Row: {
           camera_on: boolean
@@ -420,6 +498,10 @@ export type Database = {
           username: string | null
         }[]
       }
+      butecos_em_comum: {
+        Args: { _user_id: string }
+        Returns: { icon_emoji: string; name: string; server_id: string }[]
+      }
       channel_server_id: { Args: { _channel_id: string }; Returns: string }
       criar_convite: {
         Args: { _max_usos?: number; _server_id: string; _validade_min?: number }
@@ -445,6 +527,10 @@ export type Database = {
       }
       join_server_by_code: { Args: { _code: string }; Returns: Json }
       marcar_lida: { Args: { _channel_id: string }; Returns: string }
+      notas_do_perfil: {
+        Args: { _user_id: string }
+        Returns: { media: number; quesito: string; votos: number }[]
+      }
       organizar_mesas: {
         Args: { _categorias: string[]; _mesas: Json; _server_id: string }
         Returns: undefined

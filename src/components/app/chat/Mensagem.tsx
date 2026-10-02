@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CornerUpLeft, ImageIcon, Pencil, Reply, SmilePlus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { usePerfil } from "@/lib/perfil";
 import { Bottlecap } from "@/components/Bottlecap";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -244,6 +245,7 @@ export function Mensagem({
 }: Props) {
   const name = names[msg.user_id] ?? "Alguém";
   const minha = msg.user_id === userId;
+  const { abrirPerfil } = usePerfil();
 
   const corpo = editando ? (
     <EdicaoEmLinha inicial={msg.content} onSalvar={onSalvarEdicao} onCancelar={onCancelarEdicao} />
@@ -351,10 +353,23 @@ export function Mensagem({
         </div>
       ) : (
         <div className="flex gap-3 pl-1">
-          <Bottlecap name={name} src={avatars[msg.user_id]} className="mt-0.5 shrink-0" />
+          <button
+            type="button"
+            onClick={() => abrirPerfil(msg.user_id)}
+            aria-label={`Ver o perfil de ${name}`}
+            className="mt-0.5 shrink-0 self-start rounded-full"
+          >
+            <Bottlecap name={name} src={avatars[msg.user_id]} />
+          </button>
           <div className="min-w-0 flex-1">
             <p className="flex items-baseline gap-2">
-              <span className="text-sm font-semibold">{name}</span>
+              <button
+                type="button"
+                onClick={() => abrirPerfil(msg.user_id)}
+                className="text-sm font-semibold hover:underline"
+              >
+                {name}
+              </button>
               <span className="text-muted-foreground text-[11px]">
                 {formatDay(msg.created_at)} às {formatTime(msg.created_at)}
               </span>

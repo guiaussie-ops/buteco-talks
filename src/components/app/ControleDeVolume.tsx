@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { MicOff, Volume2, VolumeX } from "lucide-react";
+import { MicOff, UserRound, Volume2, VolumeX } from "lucide-react";
+import { usePerfil } from "@/lib/perfil";
 import { useVoice } from "@/lib/voice";
 import { AUDIO_DO_PARTICIPANTE_PADRAO } from "@/lib/mediaPrefs";
 import { VOLUME_MAXIMO } from "@/lib/saidaDeAudio";
@@ -57,6 +58,10 @@ export function ControleDeVolume({
   children: ReactNode;
 }) {
   const { percent, muted, definir, alternarMudo } = useAudioDoParticipante(userId);
+  const { abrirPerfil } = usePerfil();
+  // O som da tela de alguém usa o mesmo controle, com a chave "tela:<id>";
+  // esse não tem perfil para abrir.
+  const pessoa = userId.startsWith("tela:") ? null : userId;
 
   return (
     <Popover>
@@ -109,6 +114,16 @@ export function ControleDeVolume({
             `${percent}% — só pra você.`
           )}
         </p>
+
+        {pessoa && (
+          <button
+            type="button"
+            onClick={() => abrirPerfil(pessoa)}
+            className="hover:bg-muted text-muted-foreground hover:text-foreground -mx-1 flex w-[calc(100%+0.5rem)] items-center gap-2 rounded-md px-1 py-1.5 text-left text-xs transition-colors"
+          >
+            <UserRound className="size-3.5" /> Ver o perfil de {name}
+          </button>
+        )}
       </PopoverContent>
     </Popover>
   );

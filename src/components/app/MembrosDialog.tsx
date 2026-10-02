@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { usePerfil } from "@/lib/perfil";
 import { cn } from "@/lib/utils";
 import { Bottlecap } from "@/components/Bottlecap";
 import { Button } from "@/components/ui/button";
@@ -119,6 +120,7 @@ export function MembrosDialog({
   onSair,
 }: Props) {
   const qc = useQueryClient();
+  const { abrirPerfil } = usePerfil();
   const [busca, setBusca] = useState("");
   const [expulsando, setExpulsando] = useState<Pessoa | null>(null);
   const [banindo, setBanindo] = useState<Pessoa | null>(null);
@@ -224,7 +226,13 @@ export function MembrosDialog({
               />
               <div className="min-w-0 flex-1">
                 <p className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium">{p.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => abrirPerfil(p.userId)}
+                    className="truncate text-sm font-medium hover:underline"
+                  >
+                    {p.name}
+                  </button>
                   {p.userId === userId && (
                     <span className="text-muted-foreground text-[11px]">(você)</span>
                   )}

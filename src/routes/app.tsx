@@ -17,6 +17,8 @@ import { VoicePanel } from "@/components/app/VoicePanel";
 import { TelaCheia } from "@/components/app/TelaCheia";
 import { NaTelaAgora } from "@/components/app/NaTelaAgora";
 import { Salao } from "@/components/app/Salao";
+import { PerfilDialog } from "@/components/app/PerfilDialog";
+import { PerfilProvider } from "@/lib/perfil";
 import { useVoiceRoster } from "@/hooks/useVoiceRoster";
 import { ServerSettingsDialog } from "@/components/app/ServerSettingsDialog";
 import { AccountSettingsDialog } from "@/components/app/AccountSettingsDialog";
@@ -482,232 +484,237 @@ function AppPage() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      {activeServer ? (
-        <>
-          <ChannelSidebar
-            serverName={activeServer.name}
-            servers={servers}
-            onSelectServer={(id) => {
-              setActiveServerId(id);
-              setActiveChannel(null);
-            }}
-            onCreateServer={() => setCreateOpen(true)}
-            onJoinServer={() => setJoinOpen(true)}
-            inviteCode={activeServer.invite_code}
-            channels={channels}
-            categorias={categorias}
-            onOrganizar={organizar}
-            onCriarCategoria={criarCategoria}
-            onRenomearCategoria={renomearCategoria}
-            onApagarCategoria={apagarCategoria}
-            onOpenMembros={() => setMembrosOpen(true)}
-            activeChannelId={activeChannel?.id ?? null}
-            onSelect={entrarNaMesa}
-            roster={roster}
-            onOpenSalao={() => {
-              voice.sairDaTelaCheia();
-              setActiveChannel(null);
-            }}
-            isOwner={isOwner}
-            canManage={canManage}
-            onOpenSettings={() => setSettingsOpen(true)}
-            onRenameChannel={renameChannel}
-            onDeleteChannel={deleteChannel}
-            onRegenerateInvite={regenerateInvite}
-            onOpenAccount={() => setAccountOpen(true)}
-            avatarUrl={profile.avatar_url}
-            avatars={avatars}
-            onCreateChannel={createChannel}
-            displayName={profile.display_name || profile.username}
-            isAdult={isAdult}
-            onSignOut={() => void signOut()}
-            serverId={activeServer.id}
-            names={names}
-            naoLidas={naoLidas}
-            onOpenVoiceRoom={(channelId) => {
-              const c = channels.find((ch) => ch.id === channelId);
-              if (c) setActiveChannel(c);
-            }}
-          />
-          {/* A transmissão em tela cheia toma o centro de qualquer mesa; voltar
-              pra miniatura devolve a mesa que estava aberta. */}
-          {voice.telaCheia ? (
-            <TelaCheia names={names} />
-          ) : activeChannel ? (
-            activeChannel.kind === "voice" ? (
-              <VoicePanel
-                key={activeChannel.id}
-                channelId={activeChannel.id}
-                channelName={canalAtivo?.name ?? activeChannel.name}
-                userId={uid!}
-                isAdult={isAdult}
-                names={names}
-                avatars={avatars}
-                onLeave={() => {
-                  voice.leave();
-                  setActiveChannel(null);
-                }}
-                onPuxarCadeira={() =>
-                  voice.join({
-                    channelId: activeChannel.id,
-                    channelName: canalAtivo?.name ?? activeChannel.name,
-                    serverId: activeServer.id,
-                  })
-                }
-              />
-            ) : (
-              <ChatPanel
-                key={activeChannel.id}
-                channelId={activeChannel.id}
-                channelName={canalAtivo?.name ?? activeChannel.name}
-                serverId={activeServer.id}
-                userId={uid!}
-                names={names}
-                avatars={avatars}
-                usernames={usernames}
-                canModerate={canModerate}
-              />
-            )
-          ) : (
-            <Salao
+    <PerfilProvider>
+      <div className="flex h-screen overflow-hidden">
+        {activeServer ? (
+          <>
+            <ChannelSidebar
+              serverName={activeServer.name}
+              servers={servers}
+              onSelectServer={(id) => {
+                setActiveServerId(id);
+                setActiveChannel(null);
+              }}
+              onCreateServer={() => setCreateOpen(true)}
+              onJoinServer={() => setJoinOpen(true)}
+              inviteCode={activeServer.invite_code}
               channels={channels}
               categorias={categorias}
+              onOrganizar={organizar}
+              onCriarCategoria={criarCategoria}
+              onRenomearCategoria={renomearCategoria}
+              onApagarCategoria={apagarCategoria}
+              onOpenMembros={() => setMembrosOpen(true)}
+              activeChannelId={activeChannel?.id ?? null}
+              onSelect={entrarNaMesa}
               roster={roster}
-              naoLidas={naoLidas}
-              names={names}
+              onOpenSalao={() => {
+                voice.sairDaTelaCheia();
+                setActiveChannel(null);
+              }}
+              isOwner={isOwner}
+              canManage={canManage}
+              onOpenSettings={() => setSettingsOpen(true)}
+              onRenameChannel={renameChannel}
+              onDeleteChannel={deleteChannel}
+              onRegenerateInvite={regenerateInvite}
+              onOpenAccount={() => setAccountOpen(true)}
+              avatarUrl={profile.avatar_url}
               avatars={avatars}
-              onEntrar={entrarNaMesa}
+              onCreateChannel={createChannel}
+              displayName={profile.display_name || profile.username}
+              isAdult={isAdult}
+              onSignOut={() => void signOut()}
+              serverId={activeServer.id}
+              names={names}
+              naoLidas={naoLidas}
+              onOpenVoiceRoom={(channelId) => {
+                const c = channels.find((ch) => ch.id === channelId);
+                if (c) setActiveChannel(c);
+              }}
             />
-          )}
-          <NaTelaAgora names={names} avatars={avatars} isAdult={isAdult} />
-        </>
-      ) : (
-        <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
-          <h1 className="font-display text-3xl tracking-wide">Você ainda não tem nenhum buteco</h1>
-          <p className="text-muted-foreground max-w-sm text-sm">
-            Abra o seu buteco e chame a galera, ou puxe uma cadeira usando o convite de um amigo.
-          </p>
-          <div className="flex gap-2">
-            <Button onClick={() => setCreateOpen(true)}>Abrir um buteco</Button>
-            <Button variant="outline" onClick={() => setJoinOpen(true)}>
-              Usar convite
-            </Button>
-          </div>
+            {/* A transmissão em tela cheia toma o centro de qualquer mesa; voltar
+              pra miniatura devolve a mesa que estava aberta. */}
+            {voice.telaCheia ? (
+              <TelaCheia names={names} />
+            ) : activeChannel ? (
+              activeChannel.kind === "voice" ? (
+                <VoicePanel
+                  key={activeChannel.id}
+                  channelId={activeChannel.id}
+                  channelName={canalAtivo?.name ?? activeChannel.name}
+                  userId={uid!}
+                  isAdult={isAdult}
+                  names={names}
+                  avatars={avatars}
+                  onLeave={() => {
+                    voice.leave();
+                    setActiveChannel(null);
+                  }}
+                  onPuxarCadeira={() =>
+                    voice.join({
+                      channelId: activeChannel.id,
+                      channelName: canalAtivo?.name ?? activeChannel.name,
+                      serverId: activeServer.id,
+                    })
+                  }
+                />
+              ) : (
+                <ChatPanel
+                  key={activeChannel.id}
+                  channelId={activeChannel.id}
+                  channelName={canalAtivo?.name ?? activeChannel.name}
+                  serverId={activeServer.id}
+                  userId={uid!}
+                  names={names}
+                  avatars={avatars}
+                  usernames={usernames}
+                  canModerate={canModerate}
+                />
+              )
+            ) : (
+              <Salao
+                channels={channels}
+                categorias={categorias}
+                roster={roster}
+                naoLidas={naoLidas}
+                names={names}
+                avatars={avatars}
+                onEntrar={entrarNaMesa}
+              />
+            )}
+            <NaTelaAgora names={names} avatars={avatars} isAdult={isAdult} />
+          </>
+        ) : (
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+            <h1 className="font-display text-3xl tracking-wide">
+              Você ainda não tem nenhum buteco
+            </h1>
+            <p className="text-muted-foreground max-w-sm text-sm">
+              Abra o seu buteco e chame a galera, ou puxe uma cadeira usando o convite de um amigo.
+            </p>
+            <div className="flex gap-2">
+              <Button onClick={() => setCreateOpen(true)}>Abrir um buteco</Button>
+              <Button variant="outline" onClick={() => setJoinOpen(true)}>
+                Usar convite
+              </Button>
+            </div>
 
-          {/*
+            {/*
             Sem buteco não há barra lateral, e é lá que mora o acesso ao perfil.
             Sem este atalho, quem acabou de criar a conta não consegue nem trocar
             o apelido antes de entrar no primeiro buteco.
           */}
-          <button
-            onClick={() => setAccountOpen(true)}
-            title="Configurações da conta"
-            className="border-border bg-surface/60 hover:border-primary/60 hover:bg-surface mt-6 flex items-center gap-2.5 rounded-full border py-1.5 pr-4 pl-1.5 transition-colors"
-          >
-            <Bottlecap
-              name={profile.display_name || profile.username}
-              src={profile.avatar_url}
-              className="size-7 text-xs"
-            />
-            <span className="text-sm">Ajeitar meu perfil</span>
-          </button>
-        </div>
-      )}
-
-      {activeServer && uid && (
-        <MembrosDialog
-          open={membrosOpen}
-          onOpenChange={setMembrosOpen}
-          serverId={activeServer.id}
-          serverName={activeServer.name}
-          ownerId={activeServer.owner_id}
-          userId={uid}
-          meuCargo={meuCargo}
-          names={names}
-          avatars={avatars}
-          usernames={usernames}
-          roles={roles}
-          onSair={sairDoButeco}
-        />
-      )}
-
-      {activeServer && (
-        <ServerSettingsDialog
-          open={settingsOpen}
-          onOpenChange={setSettingsOpen}
-          serverName={activeServer.name}
-          iconEmoji={activeServer.icon_emoji}
-          isOwner={isOwner}
-          onSave={saveServer}
-          onDelete={deleteServer}
-        />
-      )}
-
-      <AccountSettingsDialog open={accountOpen} onOpenChange={setAccountOpen} />
-
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="font-display text-2xl tracking-wide">
-              Abrir um buteco
-            </DialogTitle>
-            <DialogDescription>
-              Ele já vem com uma mesa de texto e uma mesa de voz com compartilhamento de tela.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="server-name">Nome do buteco</Label>
-            <Input
-              id="server-name"
-              value={serverName}
-              onChange={(e) => setServerName(e.target.value)}
-              placeholder="Buteco do Zé"
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              onClick={() => createServer.mutate(serverName.trim())}
-              disabled={!serverName.trim() || createServer.isPending}
+            <button
+              onClick={() => setAccountOpen(true)}
+              title="Configurações da conta"
+              className="border-border bg-surface/60 hover:border-primary/60 hover:bg-surface mt-6 flex items-center gap-2.5 rounded-full border py-1.5 pr-4 pl-1.5 transition-colors"
             >
-              {createServer.isPending ? "Criando..." : "Criar"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={joinOpen} onOpenChange={setJoinOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="font-display text-2xl tracking-wide">
-              Puxar uma cadeira
-            </DialogTitle>
-            <DialogDescription>
-              Cole o código ou o link que seu amigo mandou no grupo.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="invite">Código ou link de convite</Label>
-            <Input
-              id="invite"
-              value={inviteInput}
-              onChange={(e) => setInviteInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && inviteInput.trim()) joinServer.mutate(inviteInput);
-              }}
-              placeholder="a1b2c3d4e5"
-            />
+              <Bottlecap
+                name={profile.display_name || profile.username}
+                src={profile.avatar_url}
+                className="size-7 text-xs"
+              />
+              <span className="text-sm">Ajeitar meu perfil</span>
+            </button>
           </div>
-          <DialogFooter>
-            <Button
-              onClick={() => joinServer.mutate(inviteInput)}
-              disabled={!inviteInput.trim() || joinServer.isPending}
-            >
-              {joinServer.isPending ? "Entrando..." : "Entrar"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+        )}
+
+        {activeServer && uid && (
+          <MembrosDialog
+            open={membrosOpen}
+            onOpenChange={setMembrosOpen}
+            serverId={activeServer.id}
+            serverName={activeServer.name}
+            ownerId={activeServer.owner_id}
+            userId={uid}
+            meuCargo={meuCargo}
+            names={names}
+            avatars={avatars}
+            usernames={usernames}
+            roles={roles}
+            onSair={sairDoButeco}
+          />
+        )}
+
+        {activeServer && (
+          <ServerSettingsDialog
+            open={settingsOpen}
+            onOpenChange={setSettingsOpen}
+            serverName={activeServer.name}
+            iconEmoji={activeServer.icon_emoji}
+            isOwner={isOwner}
+            onSave={saveServer}
+            onDelete={deleteServer}
+          />
+        )}
+
+        <AccountSettingsDialog open={accountOpen} onOpenChange={setAccountOpen} />
+        <PerfilDialog meuId={uid!} onEditarMeuPerfil={() => setAccountOpen(true)} />
+
+        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="font-display text-2xl tracking-wide">
+                Abrir um buteco
+              </DialogTitle>
+              <DialogDescription>
+                Ele já vem com uma mesa de texto e uma mesa de voz com compartilhamento de tela.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Label htmlFor="server-name">Nome do buteco</Label>
+              <Input
+                id="server-name"
+                value={serverName}
+                onChange={(e) => setServerName(e.target.value)}
+                placeholder="Buteco do Zé"
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                onClick={() => createServer.mutate(serverName.trim())}
+                disabled={!serverName.trim() || createServer.isPending}
+              >
+                {createServer.isPending ? "Criando..." : "Criar"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={joinOpen} onOpenChange={setJoinOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="font-display text-2xl tracking-wide">
+                Puxar uma cadeira
+              </DialogTitle>
+              <DialogDescription>
+                Cole o código ou o link que seu amigo mandou no grupo.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Label htmlFor="invite">Código ou link de convite</Label>
+              <Input
+                id="invite"
+                value={inviteInput}
+                onChange={(e) => setInviteInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && inviteInput.trim()) joinServer.mutate(inviteInput);
+                }}
+                placeholder="a1b2c3d4e5"
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                onClick={() => joinServer.mutate(inviteInput)}
+                disabled={!inviteInput.trim() || joinServer.isPending}
+              >
+                {joinServer.isPending ? "Entrando..." : "Entrar"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </PerfilProvider>
   );
 }
