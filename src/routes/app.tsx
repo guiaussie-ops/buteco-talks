@@ -15,7 +15,9 @@ import { ChannelSidebar, type Channel } from "@/components/app/ChannelSidebar";
 import { ChatPanel } from "@/components/app/ChatPanel";
 import { VoicePanel } from "@/components/app/VoicePanel";
 import { TelaCheia } from "@/components/app/TelaCheia";
-import { NaTelaAgora } from "@/components/app/NaTelaAgora";
+import { NaTelaAgora, useTemTelaAgora } from "@/components/app/NaTelaAgora";
+import { BarraDoCelular, Gaveta } from "@/components/app/Gaveta";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Salao } from "@/components/app/Salao";
 import { PerfilDialog } from "@/components/app/PerfilDialog";
 import { PerfilProvider } from "@/lib/perfil";
@@ -74,6 +76,15 @@ function AppPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [membrosOpen, setMembrosOpen] = useState(false);
+  /** No celular, qual gaveta está aberta: a das mesas, a das telas ou nenhuma. */
+  const [gaveta, setGaveta] = useState<"mesas" | "telas" | null>(null);
+  const celular = useIsMobile();
+  const temTelas = useTemTelaAgora();
+  // A última transmissão acabou com a gaveta das telas aberta: fecha, em vez
+  // de deixar o fundo escuro cobrindo uma gaveta vazia.
+  useEffect(() => {
+    if (gaveta === "telas" && !temTelas) setGaveta(null);
+  }, [gaveta, temTelas]);
   const [serverName, setServerName] = useState("");
   const [inviteInput, setInviteInput] = useState("");
 
@@ -483,6 +494,7 @@ function AppPage() {
     // Escolher uma mesa é querer vê-la: a tela cheia de uma transmissão volta
     // para a miniatura (o som continua).
     voice.sairDaTelaCheia();
+    setGaveta(null);
     setActiveChannel(c);
     // Entrar na mesa de voz é uma acao explicita; mudar de canal de texto
     // depois disso nao derruba a conexao.
@@ -505,99 +517,127 @@ function AppPage() {
         <div className="flex h-screen overflow-hidden">
           {activeServer ? (
             <>
-              <ChannelSidebar
-                serverName={activeServer.name}
-                servers={servers}
-                onSelectServer={(id) => {
-                  setActiveServerId(id);
-                  setActiveChannel(null);
-                }}
-                onCreateServer={() => setCreateOpen(true)}
-                onJoinServer={() => setJoinOpen(true)}
-                inviteCode={activeServer.invite_code}
-                channels={channels}
-                categorias={categorias}
-                onOrganizar={organizar}
-                onCriarCategoria={criarCategoria}
-                onRenomearCategoria={renomearCategoria}
-                onApagarCategoria={apagarCategoria}
-                onOpenMembros={() => setMembrosOpen(true)}
-                activeChannelId={activeChannel?.id ?? null}
-                onSelect={entrarNaMesa}
-                roster={roster}
-                onOpenSalao={() => {
-                  voice.sairDaTelaCheia();
-                  setActiveChannel(null);
-                }}
-                isOwner={isOwner}
-                canManage={canManage}
-                onOpenSettings={() => setSettingsOpen(true)}
-                onRenameChannel={renameChannel}
-                onDeleteChannel={deleteChannel}
-                onRegenerateInvite={regenerateInvite}
-                avatars={avatars}
-                onCreateChannel={createChannel}
-                isAdult={isAdult}
-                onSignOut={() => void signOut()}
-                serverId={activeServer.id}
-                names={names}
-                naoLidas={naoLidas}
-                onOpenVoiceRoom={(channelId) => {
-                  const c = channels.find((ch) => ch.id === channelId);
-                  if (c) setActiveChannel(c);
-                }}
-              />
-              {/* A transmissão em tela cheia toma o centro de qualquer mesa; voltar
-              pra miniatura devolve a mesa que estava aberta. */}
-              {voice.telaCheia ? (
-                <TelaCheia names={names} />
-              ) : activeChannel ? (
-                activeChannel.kind === "voice" ? (
-                  <VoicePanel
-                    key={activeChannel.id}
-                    channelId={activeChannel.id}
-                    channelName={canalAtivo?.name ?? activeChannel.name}
-                    userId={uid!}
-                    isAdult={isAdult}
-                    names={names}
-                    avatars={avatars}
-                    onLeave={() => {
-                      voice.leave();
-                      setActiveChannel(null);
-                    }}
-                    onPuxarCadeira={() =>
-                      voice.join({
-                        channelId: activeChannel.id,
-                        channelName: canalAtivo?.name ?? activeChannel.name,
-                        serverId: activeServer.id,
-                      })
-                    }
-                  />
-                ) : (
-                  <ChatPanel
-                    key={activeChannel.id}
-                    channelId={activeChannel.id}
-                    channelName={canalAtivo?.name ?? activeChannel.name}
-                    serverId={activeServer.id}
-                    userId={uid!}
-                    names={names}
-                    avatars={avatars}
-                    usernames={usernames}
-                    canModerate={canModerate}
-                  />
-                )
-              ) : (
-                <Salao
+              <Gaveta
+                lado="esquerda"
+                aberta={gaveta === "mesas"}
+                onFechar={() => setGaveta(null)}
+                rotulo="Mesas do buteco"
+              >
+                <ChannelSidebar
+                  serverName={activeServer.name}
+                  servers={servers}
+                  onSelectServer={(id) => {
+                    setActiveServerId(id);
+                    setActiveChannel(null);
+                    setGaveta(null);
+                  }}
+                  onCreateServer={() => setCreateOpen(true)}
+                  onJoinServer={() => setJoinOpen(true)}
+                  inviteCode={activeServer.invite_code}
                   channels={channels}
                   categorias={categorias}
+                  onOrganizar={organizar}
+                  onCriarCategoria={criarCategoria}
+                  onRenomearCategoria={renomearCategoria}
+                  onApagarCategoria={apagarCategoria}
+                  onOpenMembros={() => setMembrosOpen(true)}
+                  activeChannelId={activeChannel?.id ?? null}
+                  onSelect={entrarNaMesa}
                   roster={roster}
-                  naoLidas={naoLidas}
-                  names={names}
+                  onOpenSalao={() => {
+                    voice.sairDaTelaCheia();
+                    setGaveta(null);
+                    setActiveChannel(null);
+                  }}
+                  isOwner={isOwner}
+                  canManage={canManage}
+                  onOpenSettings={() => setSettingsOpen(true)}
+                  onRenameChannel={renameChannel}
+                  onDeleteChannel={deleteChannel}
+                  onRegenerateInvite={regenerateInvite}
                   avatars={avatars}
-                  onEntrar={entrarNaMesa}
+                  onCreateChannel={createChannel}
+                  isAdult={isAdult}
+                  onSignOut={() => void signOut()}
+                  serverId={activeServer.id}
+                  names={names}
+                  naoLidas={naoLidas}
+                  onOpenVoiceRoom={(channelId) => {
+                    const c = channels.find((ch) => ch.id === channelId);
+                    if (c) setActiveChannel(c);
+                  }}
                 />
-              )}
-              <NaTelaAgora names={names} avatars={avatars} isAdult={isAdult} />
+              </Gaveta>
+              <div className="flex min-w-0 flex-1 flex-col">
+                {celular && (
+                  <BarraDoCelular
+                    titulo={activeServer.name}
+                    temTelas={temTelas}
+                    onAbrirMesas={() => setGaveta("mesas")}
+                    onAbrirTelas={() => setGaveta("telas")}
+                  />
+                )}
+                <div className="flex min-h-0 flex-1">
+                  {/* A transmissão em tela cheia toma o centro de qualquer mesa; voltar
+              pra miniatura devolve a mesa que estava aberta. */}
+                  {voice.telaCheia ? (
+                    <TelaCheia names={names} />
+                  ) : activeChannel ? (
+                    activeChannel.kind === "voice" ? (
+                      <VoicePanel
+                        key={activeChannel.id}
+                        channelId={activeChannel.id}
+                        channelName={canalAtivo?.name ?? activeChannel.name}
+                        userId={uid!}
+                        isAdult={isAdult}
+                        names={names}
+                        avatars={avatars}
+                        onLeave={() => {
+                          voice.leave();
+                          setActiveChannel(null);
+                        }}
+                        onPuxarCadeira={() =>
+                          voice.join({
+                            channelId: activeChannel.id,
+                            channelName: canalAtivo?.name ?? activeChannel.name,
+                            serverId: activeServer.id,
+                          })
+                        }
+                      />
+                    ) : (
+                      <ChatPanel
+                        key={activeChannel.id}
+                        channelId={activeChannel.id}
+                        channelName={canalAtivo?.name ?? activeChannel.name}
+                        serverId={activeServer.id}
+                        userId={uid!}
+                        names={names}
+                        avatars={avatars}
+                        usernames={usernames}
+                        canModerate={canModerate}
+                      />
+                    )
+                  ) : (
+                    <Salao
+                      channels={channels}
+                      categorias={categorias}
+                      roster={roster}
+                      naoLidas={naoLidas}
+                      names={names}
+                      avatars={avatars}
+                      onEntrar={entrarNaMesa}
+                    />
+                  )}
+                </div>
+              </div>
+              <Gaveta
+                lado="direita"
+                aberta={gaveta === "telas"}
+                onFechar={() => setGaveta(null)}
+                rotulo="Transmissões"
+              >
+                <NaTelaAgora names={names} avatars={avatars} isAdult={isAdult} />
+              </Gaveta>
             </>
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">

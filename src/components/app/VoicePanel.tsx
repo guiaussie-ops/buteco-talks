@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   Headphones,
   HeadphoneOff,
@@ -35,20 +36,32 @@ type Props = {
   onPuxarCadeira: () => void;
 };
 
-/** Tamanho da área da mesa e onde ficam as cadeiras em volta, em px. */
-const AREA = 440;
-const RAIO_DAS_CADEIRAS = 178;
+/** Tamanho máximo da área da mesa, em px. No celular ela encolhe para caber. */
+const AREA_MAXIMA = 440;
 
 /**
  * Onde cada tampinha senta: distribuídas em volta da mesa, a primeira em cima.
  * Com muita gente, as cadeiras só ficam mais juntas — a mesa não cresce.
  */
-function lugar(i: number, total: number) {
+function lugar(i: number, total: number, area: number) {
   const angulo = -Math.PI / 2 + (i * 2 * Math.PI) / Math.max(total, 1);
+  const raio = area * 0.405;
   return {
-    left: AREA / 2 + RAIO_DAS_CADEIRAS * Math.cos(angulo),
-    top: AREA / 2 + RAIO_DAS_CADEIRAS * Math.sin(angulo),
+    left: area / 2 + raio * Math.cos(angulo),
+    top: area / 2 + raio * Math.sin(angulo),
   };
+}
+
+/** A área da mesa cabe na largura da tela, até o máximo. */
+function useAreaDaMesa() {
+  const [area, setArea] = useState(AREA_MAXIMA);
+  useEffect(() => {
+    const medir = () => setArea(Math.min(AREA_MAXIMA, window.innerWidth - 32));
+    medir();
+    window.addEventListener("resize", medir);
+    return () => window.removeEventListener("resize", medir);
+  }, []);
+  return area;
 }
 
 /**
@@ -146,6 +159,7 @@ export function VoicePanel({
   onPuxarCadeira,
 }: Props) {
   const voice = useVoice();
+  const area = useAreaDaMesa();
   const sentado = voice.active?.channelId === channelId;
 
   /**
@@ -180,11 +194,11 @@ export function VoicePanel({
           </div>
         )}
 
-        <div className="relative shrink-0" style={{ width: AREA, height: AREA }}>
+        <div className="relative shrink-0" style={{ width: area, height: area }}>
           {/* o tampo */}
           <div
             className="bg-mesa border-mesa-borda absolute flex flex-col items-center justify-center gap-2 rounded-full border-[12px] text-center shadow-[0_24px_50px_rgb(0_0_0/0.55)]"
-            style={{ inset: AREA * 0.22 }}
+            style={{ inset: area * 0.22 }}
           >
             <span className="font-display px-4 text-3xl leading-none tracking-wide">
               {channelName}
@@ -202,7 +216,7 @@ export function VoicePanel({
 
           {/* as cadeiras */}
           {naMesa.map((id, i) => {
-            const { left, top } = lugar(i, naMesa.length);
+            const { left, top } = lugar(i, naMesa.length, area);
             return (
               <div
                 key={id}
