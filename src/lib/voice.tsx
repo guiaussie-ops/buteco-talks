@@ -50,6 +50,13 @@ type VoiceContextValue = {
   assistindo: string[];
   assistir: (userId: string) => void;
   pararDeAssistir: (userId: string) => void;
+  /**
+   * A transmissão em foco: a que vai para a tela grande e a ÚNICA cujo áudio
+   * toca. As outras que você assiste seguem passando, sem som. `null` quando
+   * você não está assistindo ninguém.
+   */
+  foco: string | null;
+  focar: (userId: string) => void;
   speaking: Record<string, boolean>;
   participantCount: number;
   /** Microfone fechado / fone mudo de cada um dos OUTROS, vindo da presenca. */
@@ -104,6 +111,40 @@ function RamoDoParticipante({
   useEffect(() => {
     saida?.definirGanhoDoPeer(peer.userId, ganho);
   }, [saida, peer.userId, ganho, peer.stream]);
+
+  return null;
+}
+
+/** Chave do volume do áudio da tela de alguém, separado do volume da voz da pessoa. */
+export const chaveDaTela = (userId: string) => `tela:${userId}`;
+
+/**
+ * Amarra o áudio da tela de alguém ao grafo de saída, como o ramo da voz.
+ * Fica conectado mesmo fora de foco, com ganho zero: trocar de foco vira só
+ * uma rampa de volume, sem refazer nada, e o som entra na hora.
+ */
+function RamoDaTela({
+  userId,
+  stream,
+  saida,
+  ganho,
+}: {
+  userId: string;
+  stream: MediaStream;
+  saida: SaidaDeAudio | null;
+  ganho: number;
+}) {
+  const chave = chaveDaTela(userId);
+  useEffect(() => {
+    if (!saida) return;
+    saida.conectar(chave, stream);
+    return () => saida.desconectar(chave);
+  }, [saida, chave, stream]);
+
+  // O ramo nasce em 1; este efeito roda logo depois e o leva ao ganho certo.
+  useEffect(() => {
+    saida?.definirGanhoDoPeer(chave, ganho);
+  }, [saida, chave, ganho, stream]);
 
   return null;
 }
@@ -304,6 +345,17 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     };
   }, [activeChannelId, userId]);
 
+  /**
+   * Foco escolhido por último. O foco de verdade é DERIVADO: se a escolhida
+   * saiu do ar ou eu parei de assistir, cai na primeira que eu ainda assisto,
+   * sem efeito nem estado extra para ficar dessincronizado.
+   */
+  const [focoEscolhido, setFocoEscolhido] = useState<string | null>(null);
+  const assistiveis = room.assistindo.filter((id) => id in room.transmissoes);
+  const foco =
+    focoEscolhido && assistiveis.includes(focoEscolhido) ? focoEscolhido : (assistiveis[0] ?? null);
+  const focar = useCallback((id: string) => setFocoEscolhido(id), []);
+
   const speaking = useSpeaking([
     ...(userId && room.micOn ? [{ id: userId, stream: room.micStream }] : []),
     ...room.remotePeers.map((p) => ({ id: p.userId, stream: p.stream })),
@@ -429,6 +481,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       assistindo: room.assistindo,
       assistir: room.assistir,
       pararDeAssistir: room.pararDeAssistir,
+      foco,
+      focar,
       speaking,
       participantCount: room.participantCount,
       estadosDeAudio: room.estadosDeAudio,
@@ -445,6 +499,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     [
       active,
       room,
+      foco,
+      focar,
       speaking,
       prefs.peerAudio,
       setPeerVolume,
@@ -471,6 +527,20 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
             peer={p}
             saida={saida}
             ganho={ganhoEfetivo(a.volume, a.muted)}
+          />
+        );
+      })}
+      {/* Áudio das telas: todas ligadas, só a do foco com volume. */}
+      {room.remotePeers.map((p) => {
+        if (!p.audioDaTela) return null;
+        const a = prefs.peerAudio[chaveDaTela(p.userId)] ?? AUDIO_DO_PARTICIPANTE_PADRAO;
+        return (
+          <RamoDaTela
+            key={chaveDaTela(p.userId)}
+            userId={p.userId}
+            stream={p.audioDaTela}
+            saida={saida}
+            ganho={p.userId === foco ? ganhoEfetivo(a.volume, a.muted) : 0}
           />
         );
       })}

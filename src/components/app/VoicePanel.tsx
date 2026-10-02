@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import {
   Eye,
   EyeOff,
@@ -13,9 +13,10 @@ import {
   VideoOff,
   PhoneOff,
   Volume2,
+  VolumeX,
   ShieldAlert,
 } from "lucide-react";
-import { useVoice } from "@/lib/voice";
+import { chaveDaTela, useVoice } from "@/lib/voice";
 import { Bottlecap } from "@/components/Bottlecap";
 import { Button } from "@/components/ui/button";
 import {
@@ -52,12 +53,21 @@ function VideoTile({
   label,
   main,
   onParar,
+  onFocar,
+  som,
 }: {
   stream: MediaStream;
   label: string;
   main?: boolean | undefined;
   /** Só nas transmissões dos outros: fechar devolve a banda na hora. */
   onParar?: (() => void) | undefined;
+  /** Na coluna: clicar traz esta transmissão para a tela grande, com o som dela. */
+  onFocar?: (() => void) | undefined;
+  /**
+   * O que mostrar sobre o som desta transmissão. Na tela grande, o controle de
+   * volume; na coluna, o selo de "sem som". Ausente na minha própria tela.
+   */
+  som?: ReactNode;
 }) {
   const ref = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
@@ -75,20 +85,41 @@ function VideoTile({
   return (
     <div
       className={cn(
-        "bg-rail relative overflow-hidden rounded-xl border",
+        "bg-rail group/tile relative overflow-hidden rounded-xl border",
         main ? "border-primary/60 glow-ring" : "border-border",
+        onFocar && "hover:border-primary/60 cursor-pointer transition-colors",
       )}
+      onClick={onFocar}
+      role={onFocar ? "button" : undefined}
+      tabIndex={onFocar ? 0 : undefined}
+      onKeyDown={
+        onFocar
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onFocar();
+              }
+            }
+          : undefined
+      }
+      title={onFocar ? `Assistir ${label} na tela grande, com o som` : undefined}
     >
       <video
         ref={ref}
         autoPlay
         playsInline
         muted
-        className={cn("w-full bg-black object-contain", main ? "aspect-video" : "aspect-video")}
+        className="aspect-video w-full bg-black object-contain"
       />
-      <span className="bg-background/85 absolute bottom-2 left-2 rounded-md px-2 py-0.5 text-xs font-medium">
-        {label}
+      <span className="bg-background/85 absolute bottom-2 left-2 flex max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium">
+        <span className="truncate">{label}</span>
       </span>
+      {som && <div className="absolute right-2 bottom-2">{som}</div>}
+      {onFocar && (
+        <span className="bg-background/70 pointer-events-none absolute inset-0 hidden items-center justify-center text-xs font-semibold group-hover/tile:flex">
+          <Volume2 className="mr-1.5 size-4" /> Ouvir esta
+        </span>
+      )}
       {onParar && (
         /*
          * Sólido no neon da identidade, e não um ghost translúcido. Este botão
@@ -99,13 +130,78 @@ function VideoTile({
          */
         <Button
           size="sm"
-          className="bg-neon text-neon-foreground hover:bg-neon/90 absolute top-2 right-2 h-7 px-2 text-xs font-semibold shadow-md ring-1 ring-black/25"
-          onClick={onParar}
+          title="Parar de assistir"
+          className={cn(
+            "bg-neon text-neon-foreground hover:bg-neon/90 absolute top-2 right-2 z-10 h-7 text-xs font-semibold shadow-md ring-1 ring-black/25",
+            main ? "px-2" : "w-7 px-0",
+          )}
+          onClick={(e) => {
+            // Na coluna o quadro inteiro é clicável; parar não pode virar focar.
+            e.stopPropagation();
+            onParar();
+          }}
         >
-          <EyeOff className="size-3.5" /> Parar de assistir
+          <EyeOff className="size-3.5" />
+          {main && "Parar de assistir"}
         </Button>
       )}
     </div>
+  );
+}
+
+/** Quadro da tela grande enquanto a transmissão escolhida ainda está chegando. */
+function TelaChegando({ label }: { label: string }) {
+  return (
+    <div className="border-primary/60 bg-rail flex aspect-video w-full flex-col items-center justify-center gap-2 rounded-xl border">
+      <Loader2 className="text-primary size-6 animate-spin" />
+      <p className="text-muted-foreground text-sm">Abrindo a transmissão de {label}…</p>
+    </div>
+  );
+}
+
+/**
+ * Som da transmissão em foco: o volume dela, separado do volume da voz da
+ * pessoa. Dá para deixar o jogo baixinho e a voz alta, como no Discord.
+ */
+function SomDaTransmissao({
+  userId,
+  nome,
+  temAudio,
+}: {
+  userId: string;
+  nome: string;
+  temAudio: boolean;
+}) {
+  const { muted } = useAudioDoParticipante(chaveDaTela(userId));
+  if (!temAudio) {
+    return (
+      <span
+        className="bg-background/85 text-muted-foreground flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px]"
+        title="Quem transmite não marcou “compartilhar áudio”, ou é câmera"
+      >
+        <VolumeX className="size-3" /> sem áudio
+      </span>
+    );
+  }
+  return (
+    <ControleDeVolume
+      userId={chaveDaTela(userId)}
+      name={`Transmissão de ${nome}`}
+      align="end"
+      className="bg-background/85 hover:bg-background flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium"
+    >
+      {muted ? <VolumeX className="size-3.5" /> : <Volume2 className="text-primary size-3.5" />}
+      {muted ? "mudo" : "som da tela"}
+    </ControleDeVolume>
+  );
+}
+
+/** Selo das transmissões fora de foco: passam, mas sem som. */
+function SeloSemSom() {
+  return (
+    <span className="bg-background/85 text-muted-foreground flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px]">
+      <VolumeX className="size-3" /> sem som
+    </span>
   );
 }
 
@@ -221,41 +317,92 @@ export function VoicePanel({
   // Só chega aqui a transmissão de quem você pediu para assistir: quem não foi
   // pedido está com a faixa em `null` do outro lado e nem tem o que renderizar.
   const videoPeers = voice.remotePeers.filter((p) => p.hasVideo);
-  const tiles: {
-    id: string;
-    stream: MediaStream;
-    label: string;
-    onParar?: () => void;
-  }[] = [];
-  if (voice.localVideoStream) {
-    tiles.push({
-      id: "local",
-      stream: voice.localVideoStream,
-      label: voice.videoMode === "screen" ? "Sua tela" : "Sua câmera",
-    });
-  }
-  videoPeers.forEach((p) =>
-    tiles.push({
-      id: p.userId,
-      stream: p.stream,
-      label: names[p.userId] ?? "Participante",
-      onParar: () => voice.pararDeAssistir(p.userId),
-    }),
-  );
+  const nomeDe = (id: string) => names[id] ?? "Participante";
+
+  /**
+   * A tela grande é a transmissão em FOCO — a única que toca som. As outras
+   * que você assiste vão para a coluna, passando sem som, e um clique troca o
+   * foco. Sem foco (você não assiste ninguém), a sua própria tela ocupa o
+   * lugar, como antes.
+   */
+  const foco = viewingActiveRoom ? voice.foco : null;
+  const peerEmFoco = foco ? videoPeers.find((p) => p.userId === foco) : undefined;
+  const principal: ReactNode = foco ? (
+    peerEmFoco ? (
+      <VideoTile
+        stream={peerEmFoco.stream}
+        label={nomeDe(foco)}
+        onParar={() => voice.pararDeAssistir(foco)}
+        som={
+          <SomDaTransmissao userId={foco} nome={nomeDe(foco)} temAudio={!!peerEmFoco.audioDaTela} />
+        }
+        main
+      />
+    ) : (
+      <TelaChegando label={nomeDe(foco)} />
+    )
+  ) : voice.localVideoStream ? (
+    <VideoTile
+      stream={voice.localVideoStream}
+      label={voice.videoMode === "screen" ? "Sua tela" : "Sua câmera"}
+      main
+    />
+  ) : null;
+
+  const coluna = [
+    ...videoPeers
+      .filter((p) => p.userId !== foco)
+      .map((p) => (
+        <VideoTile
+          key={p.userId}
+          stream={p.stream}
+          label={nomeDe(p.userId)}
+          onParar={() => voice.pararDeAssistir(p.userId)}
+          onFocar={() => voice.focar(p.userId)}
+          som={p.audioDaTela ? <SeloSemSom /> : undefined}
+        />
+      )),
+    // Pedidas mas ainda chegando: guardam o lugar na coluna em vez de sumir.
+    ...voice.assistindo
+      .filter(
+        (id) =>
+          viewingActiveRoom &&
+          id !== foco &&
+          id in voice.transmissoes &&
+          !videoPeers.some((p) => p.userId === id),
+      )
+      .map((id) => (
+        <div
+          key={`chegando-${id}`}
+          className="border-border bg-rail text-muted-foreground flex aspect-video items-center justify-center gap-2 rounded-xl border text-xs"
+        >
+          <Loader2 className="size-4 animate-spin" /> {nomeDe(id)}
+        </div>
+      )),
+    // A própria tela vai para a coluna quando outra transmissão está em foco:
+    // é só um retorno do que você está mostrando, nunca tem som.
+    ...(foco && voice.localVideoStream
+      ? [
+          <VideoTile
+            key="local"
+            stream={voice.localVideoStream}
+            label={voice.videoMode === "screen" ? "Sua tela" : "Sua câmera"}
+          />,
+        ]
+      : []),
+  ];
 
   /**
    * Transmissões que existem mas que você ainda não está vendo: as que você não
-   * pediu, e as que você acabou de pedir e ainda não chegaram. Cada uma é
-   * independente, então várias pessoas podem transmitir ao mesmo tempo.
+   * pediu. Cada uma é independente, então várias pessoas podem transmitir ao
+   * mesmo tempo. Assistir uma nova já a traz para o foco.
    */
-  const chegou = new Set(videoPeers.map((p) => p.userId));
   const convites = viewingActiveRoom
     ? Object.entries(voice.transmissoes)
-        .filter(([id]) => !chegou.has(id))
-        .map(([id, modo]) => ({ id, modo, pedido: voice.assistindo.includes(id) }))
+        .filter(([id]) => !voice.assistindo.includes(id))
+        .map(([id, modo]) => ({ id, modo }))
     : [];
 
-  const [spotlight, ...rest] = tiles;
   const selfName = names[userId] ?? "Você";
 
   /**
@@ -298,27 +445,24 @@ export function VoicePanel({
                 nome={names[c.id] ?? "Participante"}
                 src={avatars[c.id]}
                 modo={c.modo}
-                pedido={c.pedido}
-                onAssistir={() => voice.assistir(c.id)}
+                pedido={false}
+                onAssistir={() => {
+                  voice.assistir(c.id);
+                  voice.focar(c.id);
+                }}
               />
             ))}
           </div>
         )}
 
-        {viewingActiveRoom && spotlight ? (
-          <div className="space-y-3">
-            {/* tela em destaque — quem tá mostrando o gameplay */}
-            <VideoTile
-              stream={spotlight.stream}
-              label={spotlight.label}
-              onParar={spotlight.onParar}
-              main
-            />
-            {rest.length > 0 && (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                {rest.map((t) => (
-                  <VideoTile key={t.id} stream={t.stream} label={t.label} onParar={t.onParar} />
-                ))}
+        {viewingActiveRoom && principal ? (
+          // Tela grande à esquerda e a coluna das outras à direita; no celular
+          // a coluna desce e vira uma fileira que rola para o lado.
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
+            <div className="min-w-0 flex-1">{principal}</div>
+            {coluna.length > 0 && (
+              <div className="scrollbar-thin flex shrink-0 gap-3 overflow-x-auto pb-1 lg:max-h-[75vh] lg:w-56 lg:flex-col lg:overflow-x-visible lg:overflow-y-auto lg:pb-0 xl:w-64 [&>*]:w-48 [&>*]:shrink-0 lg:[&>*]:w-full">
+                {coluna}
               </div>
             )}
           </div>

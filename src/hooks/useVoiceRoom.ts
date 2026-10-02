@@ -20,6 +20,14 @@ export type RemotePeer = {
   userId: string;
   stream: MediaStream;
   hasVideo: boolean;
+  /**
+   * Áudio da tela que a pessoa está transmitindo (jogo, vídeo, música), num
+   * stream SÓ DELE. Nunca entra em `stream`, que é a voz: misturado ali, o
+   * detector de fala acenderia a tampinha com o som do jogo e o volume da
+   * pessoa mexeria nos dois juntos. `null` quando não estou assistindo ou
+   * quando a transmissão não tem áudio.
+   */
+  audioDaTela: MediaStream | null;
 };
 
 /** O que alguém pode estar transmitindo. */
@@ -135,6 +143,12 @@ type PeerBox = {
    * sincronização de presença com o mesmo valor.
    */
   videoAtual: MediaStreamTrack | null;
+  /**
+   * Sender do áudio da tela. Mesma ideia do de vídeo: nasce com o peer, vazio,
+   * e só recebe faixa para quem pediu para assistir. Sem renegociar nunca.
+   */
+  telaAudioSender: RTCRtpSender | null;
+  telaAudioAtual: MediaStreamTrack | null;
   /** Negociação que falhou por estado instável e precisa ser refeita. */
   renegociarPendente: boolean;
   /** Tentativas de volta seguidas, sem sucesso no meio. Zera ao conectar. */
@@ -227,6 +241,8 @@ export function useVoiceRoom(
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
   const remoteStreamsRef = useRef<Map<string, MediaStream>>(new Map());
+  /** Áudio da tela recebido de cada um, separado da voz. Ver `RemotePeer.audioDaTela`. */
+  const telaStreamsRef = useRef<Map<string, MediaStream>>(new Map());
 
   const publish = useCallback(() => {
     setRemotePeers(
@@ -246,6 +262,14 @@ export function useVoiceRoom(
         hasVideo:
           assistindoRef.current.includes(id) &&
           stream.getVideoTracks().some((t) => !t.muted && t.readyState === "live"),
+        // As mesmas duas condições do vídeo, pelos mesmos motivos.
+        audioDaTela: (() => {
+          const tela = telaStreamsRef.current.get(id);
+          const vivo =
+            assistindoRef.current.includes(id) &&
+            !!tela?.getAudioTracks().some((t) => !t.muted && t.readyState === "live");
+          return vivo ? tela! : null;
+        })(),
       })),
     );
   }, []);
@@ -326,8 +350,23 @@ export function useVoiceRoom(
 
   const aplicarVideoNosPeers = useCallback(() => {
     const track = videoStreamRef.current?.getVideoTracks()[0] ?? null;
+    // Só tela tem áudio: câmera nunca pede. E só existe se a pessoa marcou
+    // "compartilhar áudio" na janela do navegador.
+    const audioDaTela =
+      videoModeRef.current === "screen"
+        ? (videoStreamRef.current?.getAudioTracks()[0] ?? null)
+        : null;
     peersRef.current.forEach((box, id) => {
-      const alvo = quemQuerMeuVideoRef.current.has(id) ? track : null;
+      const quer = quemQuerMeuVideoRef.current.has(id);
+      // O áudio vai para a mesma plateia do vídeo. Quem vê várias telas recebe
+      // o áudio de todas e escolhe localmente qual tocar: trocar de foco fica
+      // instantâneo, e áudio custa pouco perto do vídeo que já está chegando.
+      const alvoAudio = quer ? audioDaTela : null;
+      if (box.telaAudioAtual !== alvoAudio) {
+        box.telaAudioAtual = alvoAudio;
+        void box.telaAudioSender?.replaceTrack(alvoAudio).catch(() => undefined);
+      }
+      const alvo = quer ? track : null;
       if (box.videoAtual !== alvo) {
         box.videoAtual = alvo;
         if (box.videoSender) {
@@ -401,6 +440,30 @@ export function useVoiceRoom(
       if (faixa) armarFaixa(remoteId, faixa);
     },
     [armarFaixa],
+  );
+
+  /** Prende o áudio da tela recebido ao stream de tela da pessoa. */
+  const armarAudioDaTela = useCallback(
+    (remoteId: string, track: MediaStreamTrack) => {
+      let stream = telaStreamsRef.current.get(remoteId);
+      if (!stream) {
+        stream = new MediaStream();
+        telaStreamsRef.current.set(remoteId, stream);
+      }
+      const alvo = stream;
+      alvo.getAudioTracks().forEach((t) => {
+        if (t.id !== track.id) alvo.removeTrack(t);
+      });
+      if (!alvo.getTracks().some((t) => t.id === track.id)) alvo.addTrack(track);
+      track.onended = () => {
+        alvo.removeTrack(track);
+        publish();
+      };
+      track.onmute = publish;
+      track.onunmute = publish;
+      publish();
+    },
+    [publish],
   );
 
   /**
@@ -685,6 +748,7 @@ export function useVoiceRoom(
       }
       peersRef.current.delete(remoteId);
       remoteStreamsRef.current.delete(remoteId);
+      telaStreamsRef.current.delete(remoteId);
       publish();
 
       const novo = createPeerRef.current?.(remoteId, !souImpolido(remoteId));
@@ -748,6 +812,8 @@ export function useVoiceRoom(
         audioSender: null,
         videoSender: null,
         videoAtual: null,
+        telaAudioSender: null,
+        telaAudioAtual: null,
         renegociarPendente: false,
         tentativas: 0,
         timerDeVolta: null,
@@ -766,9 +832,14 @@ export function useVoiceRoom(
       try {
         const transceiver = pc.addTransceiver("video", { direction: "sendonly" });
         box.videoSender = transceiver.sender;
+        // O áudio da tela ganha uma linha própria, criada SEM stream associado.
+        // É isso que o outro lado usa para separá-lo da voz no `ontrack`: o
+        // microfone entra por addTrack com o micStream e chega com
+        // `e.streams` preenchido; este chega com `e.streams` vazio.
+        box.telaAudioSender = pc.addTransceiver("audio", { direction: "sendonly" }).sender;
       } catch {
         // Navegador sem addTransceiver: o sender nasce lá no aplicarVideoNosPeers,
-        // por addTrack, quando alguém pedir de fato.
+        // por addTrack, quando alguém pedir de fato. Áudio de tela fica de fora.
       }
 
       pc.onicecandidate = (e) => {
@@ -802,6 +873,14 @@ export function useVoiceRoom(
       };
 
       pc.ontrack = (e) => {
+        // Áudio sem stream é o da tela (ver a criação do transceiver acima).
+        // Vai para um stream à parte, e fica armado mesmo sem eu assistir: chega
+        // mudo enquanto o outro lado manda `null`, e o `publish` só o entrega
+        // quando eu peço. Assim não precisa de repescagem ao voltar a assistir.
+        if (e.track.kind === "audio" && e.streams.length === 0) {
+          armarAudioDaTela(remoteId, e.track);
+          return;
+        }
         // Vídeo que eu não pedi não entra no stream. Ele CHEGA de qualquer
         // jeito — o transceiver nasce com o peer —, mas ficar de fora até eu
         // pedir é o que mantém a lista de faixas honesta.
@@ -877,6 +956,7 @@ export function useVoiceRoom(
     [
       agendarVolta,
       aplicarTetoDeBitrate,
+      armarAudioDaTela,
       armarFaixa,
       cancelarVolta,
       publish,
@@ -903,6 +983,7 @@ export function useVoiceRoom(
       }
       peersRef.current.delete(remoteId);
       remoteStreamsRef.current.delete(remoteId);
+      telaStreamsRef.current.delete(remoteId);
       publish();
     },
     [cancelarVolta, publish],
@@ -1068,6 +1149,7 @@ export function useVoiceRoom(
       });
       peersRef.current.clear();
       remoteStreamsRef.current.clear();
+      telaStreamsRef.current.clear();
       setRemotePeers([]);
       setParticipants([]);
       setTransmissoes({});
@@ -1219,8 +1301,23 @@ export function useVoiceRoom(
           mode === "screen"
             ? await navigator.mediaDevices.getDisplayMedia({
                 video: { frameRate: 30 },
-                audio: true,
-              })
+                // Áudio de jogo e de música, não de voz: os três filtros de voz
+                // do navegador estragariam o som (o supressor come música, o
+                // ganho automático bombeia o volume). E `restrictOwnAudio` pede
+                // ao Chrome para não capturar o som desta própria aba — senão,
+                // compartilhando a tela inteira com áudio do sistema, a voz da
+                // mesa voltaria pela transmissão para quem está assistindo.
+                // Navegador que não conhece a opção simplesmente a ignora.
+                audio: {
+                  echoCancellation: false,
+                  noiseSuppression: false,
+                  autoGainControl: false,
+                  restrictOwnAudio: true,
+                } as MediaTrackConstraints,
+                // Oferece "compartilhar áudio do sistema" também na tela inteira,
+                // não só em abas.
+                systemAudio: "include",
+              } as DisplayMediaStreamOptions)
             : await navigator.mediaDevices.getUserMedia({
                 video: videoConstraints(prefsRef.current),
               });
