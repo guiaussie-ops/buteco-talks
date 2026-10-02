@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Check, Copy, Link2, RefreshCw } from "lucide-react";
+import { ConvitesComPrazo } from "@/components/app/ConvitesComPrazo";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -27,6 +28,7 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   serverName: string;
   inviteCode: string;
+  serverId: string;
   canManage: boolean;
   onRegenerate: () => Promise<void>;
 };
@@ -42,6 +44,7 @@ export function InviteDialog({
   onOpenChange,
   serverName,
   inviteCode,
+  serverId,
   canManage,
   onRegenerate,
 }: Props) {
@@ -84,7 +87,7 @@ export function InviteDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="wood-texture">
+        <DialogContent className="wood-texture scrollbar-thin max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display text-2xl tracking-wide">
               Convidar a galera
@@ -131,6 +134,8 @@ export function InviteDialog({
                 Quem já tem conta cola isso em “Puxar uma cadeira”.
               </p>
             </div>
+
+            {canManage && <ConvitesComPrazo serverId={serverId} aberto={open} />}
 
             {canManage && (
               <div className="border-border border-t pt-4">

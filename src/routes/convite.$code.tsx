@@ -16,7 +16,27 @@ export const Route = createFileRoute("/convite/$code")({
   component: InvitePage,
 });
 
-type State = "checking" | "joining" | "not_found" | "error";
+type State = "checking" | "joining" | "not_found" | "expired" | "banned" | "error";
+
+const FALHAS: Record<Exclude<State, "checking" | "joining">, { titulo: string; texto: string }> = {
+  not_found: {
+    titulo: "Esse convite não vale mais",
+    texto:
+      "O código pode ter sido trocado pelo dono do buteco, ou veio digitado errado. Peça um link novo pra quem te chamou.",
+  },
+  expired: {
+    titulo: "Esse convite venceu",
+    texto: "Ele tinha prazo ou número de usos, e acabou. Peça um link novo pra quem te chamou.",
+  },
+  banned: {
+    titulo: "Porta fechada pra você",
+    texto: "Você foi banido desse buteco, e convite nenhum abre essa porta.",
+  },
+  error: {
+    titulo: "Deu ruim no convite",
+    texto: "Algo falhou no caminho. Tenta de novo daqui a pouco.",
+  },
+};
 
 function InvitePage() {
   const { code } = Route.useParams();
@@ -53,30 +73,26 @@ function InvitePage() {
       } else if (status === "already_member") {
         toast.info("Você já está nesse buteco.");
         void navigate({ to: "/app", replace: true });
+      } else if (status === "expired" || status === "banned") {
+        setState(status);
       } else {
         setState("not_found");
       }
     })();
   }, [loading, session, code, navigate]);
 
-  const failed = state === "not_found" || state === "error";
+  const falha = state === "checking" || state === "joining" ? null : FALHAS[state];
 
   return (
     <div className="wood-texture flex min-h-screen items-center justify-center p-6">
       <div className="border-border bg-surface w-full max-w-md rounded-2xl border p-8 text-center">
-        {failed ? (
+        {falha ? (
           <>
             <span className="bg-surface-2 text-muted-foreground mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl">
               <Frown className="size-7" />
             </span>
-            <h1 className="font-display mb-2 text-2xl tracking-wide">
-              {state === "not_found" ? "Esse convite não vale mais" : "Deu ruim no convite"}
-            </h1>
-            <p className="text-muted-foreground mb-6 text-sm">
-              {state === "not_found"
-                ? "O código pode ter sido trocado pelo dono do buteco, ou veio digitado errado. Peça um link novo pra quem te chamou."
-                : "Algo falhou no caminho. Tenta de novo daqui a pouco."}
-            </p>
+            <h1 className="font-display mb-2 text-2xl tracking-wide">{falha.titulo}</h1>
+            <p className="text-muted-foreground mb-6 text-sm">{falha.texto}</p>
             <Button asChild>
               <Link to="/app">Ir pros meus butecos</Link>
             </Button>

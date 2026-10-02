@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       channels: {
         Row: {
+          category_id: string | null
           created_at: string
           id: string
           kind: string
@@ -24,6 +25,7 @@ export type Database = {
           server_id: string
         }
         Insert: {
+          category_id?: string | null
           created_at?: string
           id?: string
           kind?: string
@@ -32,6 +34,7 @@ export type Database = {
           server_id: string
         }
         Update: {
+          category_id?: string | null
           created_at?: string
           id?: string
           kind?: string
@@ -41,7 +44,46 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "channels_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "channel_categories"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "channels_server_id_fkey"
+            columns: ["server_id"]
+            isOneToOne: false
+            referencedRelation: "servers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      channel_categories: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          position: number
+          server_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          position?: number
+          server_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          position?: number
+          server_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channel_categories_server_id_fkey"
             columns: ["server_id"]
             isOneToOne: false
             referencedRelation: "servers"
@@ -224,6 +266,76 @@ export type Database = {
           },
         ]
       }
+      server_bans: {
+        Row: {
+          banned_by: string | null
+          created_at: string
+          reason: string | null
+          server_id: string
+          user_id: string
+        }
+        Insert: {
+          banned_by?: string | null
+          created_at?: string
+          reason?: string | null
+          server_id: string
+          user_id: string
+        }
+        Update: {
+          banned_by?: string | null
+          created_at?: string
+          reason?: string | null
+          server_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "server_bans_server_id_fkey"
+            columns: ["server_id"]
+            isOneToOne: false
+            referencedRelation: "servers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      server_invites: {
+        Row: {
+          code: string
+          created_at: string
+          created_by: string
+          expires_at: string | null
+          max_uses: number | null
+          server_id: string
+          uses: number
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          created_by: string
+          expires_at?: string | null
+          max_uses?: number | null
+          server_id: string
+          uses?: number
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          created_by?: string
+          expires_at?: string | null
+          max_uses?: number | null
+          server_id?: string
+          uses?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "server_invites_server_id_fkey"
+            columns: ["server_id"]
+            isOneToOne: false
+            referencedRelation: "servers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       servers: {
         Row: {
           created_at: string
@@ -297,7 +409,31 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      banidos: {
+        Args: { _server_id: string }
+        Returns: {
+          avatar_url: string | null
+          created_at: string
+          display_name: string | null
+          reason: string | null
+          user_id: string
+          username: string | null
+        }[]
+      }
       channel_server_id: { Args: { _channel_id: string }; Returns: string }
+      criar_convite: {
+        Args: { _max_usos?: number; _server_id: string; _validade_min?: number }
+        Returns: string
+      }
+      definir_cargo: {
+        Args: { _role: string; _server_id: string; _user_id: string }
+        Returns: undefined
+      }
+      desbanir: { Args: { _server_id: string; _user_id: string }; Returns: undefined }
+      expulsar: {
+        Args: { _banir?: boolean; _motivo?: string; _server_id: string; _user_id: string }
+        Returns: undefined
+      }
       is_adult: { Args: { _user_id: string }; Returns: boolean }
       is_server_member: {
         Args: { _server_id: string; _user_id: string }
@@ -309,6 +445,10 @@ export type Database = {
       }
       join_server_by_code: { Args: { _code: string }; Returns: Json }
       marcar_lida: { Args: { _channel_id: string }; Returns: string }
+      organizar_mesas: {
+        Args: { _categorias: string[]; _mesas: Json; _server_id: string }
+        Returns: undefined
+      }
       nao_lidas: {
         Args: { _server_id: string }
         Returns: { channel_id: string; mencoes: number; nao_lidas: number }[]

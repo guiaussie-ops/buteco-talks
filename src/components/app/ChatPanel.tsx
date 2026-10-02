@@ -46,8 +46,8 @@ type Props = {
   names: Record<string, string>;
   avatars: Record<string, string | null>;
   usernames: Record<string, string>;
-  /** Dono e admins apagam mensagem dos outros. */
-  canManage: boolean;
+  /** Dono, admins e moderadores apagam mensagem dos outros. */
+  canModerate: boolean;
 };
 
 /** Distância do fim em que a lista ainda conta como "colada embaixo". */
@@ -79,7 +79,7 @@ export function ChatPanel({
   names,
   avatars,
   usernames,
-  canManage,
+  canModerate,
 }: Props) {
   const chat = useChatChannel({ channelId, serverId, userId });
   const { messages } = chat;
@@ -300,7 +300,7 @@ export function ChatPanel({
                   urlImagem={m.image_path ? chat.urls[m.image_path] : undefined}
                   reacoes={reacoesPorMensagem.get(m.id) ?? []}
                   mencionaMe={m.user_id !== userId && menciona(m.content, userId, usernames)}
-                  podeApagar={m.user_id === userId || canManage}
+                  podeApagar={m.user_id === userId || canModerate}
                   editando={editandoId === m.id}
                   onComecarEdicao={() => setEditandoId(m.id)}
                   onSalvarEdicao={async (texto) => {

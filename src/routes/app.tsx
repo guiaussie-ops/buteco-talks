@@ -6,6 +6,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { useVoice } from "@/lib/voice";
 import { useNaoLidas } from "@/hooks/useNaoLidas";
+import { useButecoAoVivo } from "@/hooks/useButecoAoVivo";
+import { MembrosDialog } from "@/components/app/MembrosDialog";
+import { PESO, cargoDe } from "@/lib/cargos";
+import type { Arrumacao, Categoria } from "@/lib/organizacao";
 import { ServerRail, type ServerItem } from "@/components/app/ServerRail";
 import { ChannelSidebar, type Channel } from "@/components/app/ChannelSidebar";
 import { ChatPanel } from "@/components/app/ChatPanel";
@@ -60,6 +64,7 @@ function AppPage() {
   const [joinOpen, setJoinOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [membrosOpen, setMembrosOpen] = useState(false);
   const [serverName, setServerName] = useState("");
   const [inviteInput, setInviteInput] = useState("");
 
@@ -90,16 +95,29 @@ function AppPage() {
     if (!activeServerId && servers.length > 0) setActiveServerId(servers[0]!.id);
   }, [servers, activeServerId]);
 
+  // O buteco aberto sumiu da minha lista: fui expulso, banido ou ele fechou.
+  // Sai da tela dele, e da mesa de voz se eu estava sentado lá.
+  useEffect(() => {
+    if (!serversQuery.isSuccess || !activeServerId) return;
+    if (servers.some((s) => s.id === activeServerId)) return;
+    if (voice.active?.serverId === activeServerId) voice.leave();
+    setActiveServerId(servers[0]?.id ?? null);
+    setActiveChannel(null);
+    toast.info("Você não está mais nesse buteco.");
+  }, [serversQuery.isSuccess, servers, activeServerId, voice]);
+
+  useButecoAoVivo(activeServerId, uid);
+
   const channelsQuery = useQuery({
     queryKey: ["channels", activeServerId],
     enabled: !!activeServerId,
     queryFn: async (): Promise<Channel[]> => {
       const { data, error } = await supabase
         .from("channels")
-        .select("id, name, kind, server_id")
+        .select("id, name, kind, server_id, category_id, position")
         .eq("server_id", activeServerId!)
-        .order("kind", { ascending: true })
-        .order("name", { ascending: true });
+        .order("position", { ascending: true })
+        .order("created_at", { ascending: true });
       if (error) throw error;
       return (data ?? []) as Channel[];
     },
@@ -107,12 +125,37 @@ function AppPage() {
 
   const channels = useMemo(() => channelsQuery.data ?? [], [channelsQuery.data]);
 
+  const categoriasQuery = useQuery({
+    queryKey: ["categorias", activeServerId],
+    enabled: !!activeServerId,
+    queryFn: async (): Promise<Categoria[]> => {
+      const { data, error } = await supabase
+        .from("channel_categories")
+        .select("id, name, position")
+        .eq("server_id", activeServerId!)
+        .order("position", { ascending: true });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+  const categorias = useMemo(() => categoriasQuery.data ?? [], [categoriasQuery.data]);
+
   useEffect(() => {
     if (!activeServerId) return;
-    if (activeChannel && activeChannel.server_id === activeServerId) return;
+    // Mesa apagada por outra pessoa enquanto eu estava nela também conta como
+    // "sem mesa": cai na primeira de texto.
+    const sumiu =
+      channelsQuery.isSuccess &&
+      !!activeChannel &&
+      !channels.some((c) => c.id === activeChannel.id);
+    if (activeChannel && activeChannel.server_id === activeServerId && !sumiu) return;
     const first = channels.find((c) => c.kind === "text") ?? channels[0] ?? null;
     setActiveChannel(first);
-  }, [channels, activeServerId, activeChannel]);
+  }, [channels, channelsQuery.isSuccess, activeServerId, activeChannel]);
+
+  // O objeto guardado em activeChannel envelhece quando alguém renomeia a mesa;
+  // o nome que aparece vem sempre da lista atual.
+  const canalAtivo = channels.find((c) => c.id === activeChannel?.id) ?? activeChannel;
 
   const membersQuery = useQuery({
     queryKey: ["members", activeServerId],
@@ -121,14 +164,16 @@ function AppPage() {
       names: Record<string, string>;
       avatars: Record<string, string | null>;
       usernames: Record<string, string>;
+      roles: Record<string, string>;
     }> => {
       const { data: members, error } = await supabase
         .from("server_members")
-        .select("user_id")
+        .select("user_id, role")
         .eq("server_id", activeServerId!);
       if (error) throw error;
       const ids = (members ?? []).map((m) => m.user_id);
-      if (ids.length === 0) return { names: {}, avatars: {}, usernames: {} };
+      const roles = Object.fromEntries((members ?? []).map((m) => [m.user_id, m.role]));
+      if (ids.length === 0) return { names: {}, avatars: {}, usernames: {}, roles };
       const { data: profiles } = await supabase
         .from("profiles")
         .select("id, display_name, username, avatar_url")
@@ -141,13 +186,14 @@ function AppPage() {
         avatars[p.id] = p.avatar_url;
         usernames[p.id] = p.username;
       });
-      return { names, avatars, usernames };
+      return { names, avatars, usernames, roles };
     },
   });
 
   const names = membersQuery.data?.names ?? {};
   const avatars = membersQuery.data?.avatars ?? {};
   const usernames = membersQuery.data?.usernames ?? {};
+  const roles = membersQuery.data?.roles ?? {};
 
   const naoLidas = useNaoLidas(
     activeServerId,
@@ -169,9 +215,17 @@ function AppPage() {
         .from("server_members")
         .insert({ server_id: serverId, user_id: uid!, role: "owner" });
       if (memberError) throw memberError;
+      // Já nasce com as duas categorias de sempre, que dá para renomear e arrumar.
+      const texto = crypto.randomUUID();
+      const voz = crypto.randomUUID();
+      const { error: categoriaError } = await supabase.from("channel_categories").insert([
+        { id: texto, server_id: serverId, name: "Mesas de texto", position: 0 },
+        { id: voz, server_id: serverId, name: "Mesas de voz", position: 1 },
+      ]);
+      if (categoriaError) throw categoriaError;
       const { error: channelError } = await supabase.from("channels").insert([
-        { server_id: serverId, name: "geral", kind: "text" },
-        { server_id: serverId, name: "sala-de-tela", kind: "voice" },
+        { server_id: serverId, name: "geral", kind: "text", category_id: texto, position: 0 },
+        { server_id: serverId, name: "sala-de-tela", kind: "voice", category_id: voz, position: 1 },
       ]);
       if (channelError) throw channelError;
       return serverId;
@@ -192,11 +246,22 @@ function AppPage() {
     mutationFn: async (code: string) => {
       const { data, error } = await supabase.rpc("join_server_by_code", { _code: code });
       if (error) throw error;
-      return data as { status: "joined" | "already_member" | "not_found"; server_id?: string };
+      return data as {
+        status: "joined" | "already_member" | "not_found" | "expired" | "banned";
+        server_id?: string;
+      };
     },
     onSuccess: async (result) => {
       if (result.status === "not_found") {
         toast.error("Esse convite não existe ou já foi trocado. Peça um link novo.");
+        return;
+      }
+      if (result.status === "expired") {
+        toast.error("Esse convite venceu ou já foi usado o máximo de vezes. Peça um novo.");
+        return;
+      }
+      if (result.status === "banned") {
+        toast.error("Você foi banido desse buteco.");
         return;
       }
       await qc.invalidateQueries({ queryKey: ["servers", uid] });
@@ -213,10 +278,12 @@ function AppPage() {
     onError: () => toast.error("Não consegui abrir esse convite. Tenta de novo."),
   });
 
-  const createChannel = async (name: string, kind: "text" | "voice") => {
+  const createChannel = async (name: string, kind: "text" | "voice", categoryId: string | null) => {
+    // Entra no fim da categoria escolhida.
+    const position = channels.reduce((max, c) => Math.max(max, c.position), -1) + 1;
     const { error } = await supabase
       .from("channels")
-      .insert({ server_id: activeServerId!, name, kind });
+      .insert({ server_id: activeServerId!, name, kind, category_id: categoryId, position });
     if (error) {
       toast.error("Não consegui criar a mesa.");
       return;
@@ -224,9 +291,96 @@ function AppPage() {
     await qc.invalidateQueries({ queryKey: ["channels", activeServerId] });
   };
 
-  const canManage =
-    !!activeServer && (activeServer.owner_id === uid || activeServer.my_role === "admin");
-  const isOwner = !!activeServer && activeServer.owner_id === uid;
+  const meuCargo = activeServer
+    ? cargoDe(activeServer.my_role, uid!, activeServer.owner_id)
+    : "member";
+  const canManage = !!activeServer && PESO[meuCargo] >= PESO.admin;
+  const canModerate = !!activeServer && PESO[meuCargo] >= PESO.moderador;
+  const isOwner = meuCargo === "owner";
+
+  /**
+   * Grava a arrumação nova das mesas. Aplica na tela antes, para o arrastar
+   * não pular de volta enquanto o banco responde; se der erro, recarrega.
+   */
+  const organizar = async (arrumacao: Arrumacao) => {
+    if (!activeServerId) return;
+    const posMesa = new Map(arrumacao.mesas.map((m, i) => [m.id, { ...m, position: i }]));
+    const posCategoria = new Map(arrumacao.categorias.map((id, i) => [id, i]));
+    qc.setQueryData<Channel[]>(["channels", activeServerId], (prev) =>
+      prev
+        ?.map((c) => {
+          const novo = posMesa.get(c.id);
+          return novo ? { ...c, category_id: novo.category_id, position: novo.position } : c;
+        })
+        .sort((a, b) => a.position - b.position),
+    );
+    qc.setQueryData<Categoria[]>(["categorias", activeServerId], (prev) =>
+      prev
+        ?.map((k) => ({ ...k, position: posCategoria.get(k.id) ?? k.position }))
+        .sort((a, b) => a.position - b.position),
+    );
+    const { error } = await supabase.rpc("organizar_mesas", {
+      _server_id: activeServerId,
+      _categorias: arrumacao.categorias,
+      _mesas: arrumacao.mesas,
+    });
+    if (error) {
+      toast.error("Não consegui arrumar as mesas.");
+      await qc.invalidateQueries({ queryKey: ["channels", activeServerId] });
+      await qc.invalidateQueries({ queryKey: ["categorias", activeServerId] });
+    }
+  };
+
+  const criarCategoria = async (name: string) => {
+    const position = categorias.reduce((max, k) => Math.max(max, k.position), -1) + 1;
+    const { error } = await supabase
+      .from("channel_categories")
+      .insert({ server_id: activeServerId!, name, position });
+    if (error) {
+      toast.error("Não consegui criar a categoria.");
+      return;
+    }
+    await qc.invalidateQueries({ queryKey: ["categorias", activeServerId] });
+  };
+
+  const renomearCategoria = async (id: string, name: string) => {
+    const { error } = await supabase.from("channel_categories").update({ name }).eq("id", id);
+    if (error) {
+      toast.error("Não consegui renomear a categoria.");
+      return;
+    }
+    await qc.invalidateQueries({ queryKey: ["categorias", activeServerId] });
+  };
+
+  const apagarCategoria = async (id: string) => {
+    // As mesas dela ficam soltas (ON DELETE SET NULL), não somem.
+    const { error } = await supabase.from("channel_categories").delete().eq("id", id);
+    if (error) {
+      toast.error("Não consegui apagar a categoria.");
+      return;
+    }
+    await qc.invalidateQueries({ queryKey: ["categorias", activeServerId] });
+    await qc.invalidateQueries({ queryKey: ["channels", activeServerId] });
+  };
+
+  const sairDoButeco = async () => {
+    if (!activeServer || !uid) return;
+    const { error } = await supabase
+      .from("server_members")
+      .delete()
+      .eq("server_id", activeServer.id)
+      .eq("user_id", uid);
+    if (error) {
+      toast.error("Não consegui sair do buteco.");
+      return;
+    }
+    if (voice.active?.serverId === activeServer.id) voice.leave();
+    setMembrosOpen(false);
+    setActiveServerId(null);
+    setActiveChannel(null);
+    await qc.invalidateQueries({ queryKey: ["servers", uid] });
+    toast.success(`Você saiu de ${activeServer.name}.`);
+  };
 
   const saveServer = async (name: string, iconEmoji: string) => {
     if (!activeServer) return;
@@ -319,6 +473,12 @@ function AppPage() {
             serverName={activeServer.name}
             inviteCode={activeServer.invite_code}
             channels={channels}
+            categorias={categorias}
+            onOrganizar={organizar}
+            onCriarCategoria={criarCategoria}
+            onRenomearCategoria={renomearCategoria}
+            onApagarCategoria={apagarCategoria}
+            onOpenMembros={() => setMembrosOpen(true)}
             activeChannelId={activeChannel?.id ?? null}
             onSelect={(c) => {
               setActiveChannel(c);
@@ -354,7 +514,7 @@ function AppPage() {
               <VoicePanel
                 key={activeChannel.id}
                 channelId={activeChannel.id}
-                channelName={activeChannel.name}
+                channelName={canalAtivo?.name ?? activeChannel.name}
                 userId={uid!}
                 isAdult={isAdult}
                 names={names}
@@ -369,13 +529,13 @@ function AppPage() {
               <ChatPanel
                 key={activeChannel.id}
                 channelId={activeChannel.id}
-                channelName={activeChannel.name}
+                channelName={canalAtivo?.name ?? activeChannel.name}
                 serverId={activeServer.id}
                 userId={uid!}
                 names={names}
                 avatars={avatars}
                 usernames={usernames}
-                canManage={canManage}
+                canModerate={canModerate}
               />
             )
           ) : (
@@ -415,6 +575,23 @@ function AppPage() {
             <span className="text-sm">Ajeitar meu perfil</span>
           </button>
         </div>
+      )}
+
+      {activeServer && uid && (
+        <MembrosDialog
+          open={membrosOpen}
+          onOpenChange={setMembrosOpen}
+          serverId={activeServer.id}
+          serverName={activeServer.name}
+          ownerId={activeServer.owner_id}
+          userId={uid}
+          meuCargo={meuCargo}
+          names={names}
+          avatars={avatars}
+          usernames={usernames}
+          roles={roles}
+          onSair={sairDoButeco}
+        />
       )}
 
       {activeServer && (

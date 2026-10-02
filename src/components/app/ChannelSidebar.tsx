@@ -1,5 +1,19 @@
-import { useState } from "react";
-import { Hash, Volume2, Plus, UserPlus, LogOut, ShieldCheck, ShieldAlert } from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  FolderInput,
+  FolderPlus,
+  Hash,
+  LogOut,
+  Plus,
+  ShieldAlert,
+  ShieldCheck,
+  UserPlus,
+  Users,
+  Volume2,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,11 +39,26 @@ import {
 } from "@/components/app/ControleDeVolume";
 import { useVoiceRoster } from "@/hooks/useVoiceRoster";
 import type { NaoLidas } from "@/hooks/useNaoLidas";
+import {
+  arrumacaoDe,
+  deslocarCategoria,
+  deslocarMesa,
+  montarBlocos,
+  moverCategoria,
+  moverMesa,
+  type Arrumacao,
+  type Bloco,
+  type Categoria,
+} from "@/lib/organizacao";
 import { Settings, MoreVertical, Pencil, Trash2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -49,16 +78,34 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-export type Channel = { id: string; name: string; kind: string; server_id: string };
+export type Channel = {
+  id: string;
+  name: string;
+  kind: string;
+  server_id: string;
+  category_id: string | null;
+  position: number;
+};
 
 type Props = {
   serverName: string;
   inviteCode: string | null;
   channels: Channel[];
+  categorias: Categoria[];
+  /** Grava a arrumação nova de mesas e categorias (arrastar, subir, descer, mover). */
+  onOrganizar: (arrumacao: Arrumacao) => Promise<void>;
+  onCriarCategoria: (name: string) => Promise<void>;
+  onRenomearCategoria: (id: string, name: string) => Promise<void>;
+  onApagarCategoria: (id: string) => Promise<void>;
+  onOpenMembros: () => void;
   activeChannelId: string | null;
   onSelect: (c: Channel) => void;
   isOwner: boolean;
-  onCreateChannel: (name: string, kind: "text" | "voice") => Promise<void>;
+  onCreateChannel: (
+    name: string,
+    kind: "text" | "voice",
+    categoryId: string | null,
+  ) => Promise<void>;
   displayName: string;
   isAdult: boolean;
   onSignOut: () => void;
@@ -127,10 +174,25 @@ function ParticipanteSentado({
   );
 }
 
+/** O que está sendo arrastado e onde a soltura cairia, para desenhar a marca. */
+type Arraste = { tipo: "mesa" | "categoria"; id: string };
+type Alvo =
+  | { tipo: "antes-da-mesa"; id: string }
+  | { tipo: "fim-da-categoria"; id: string | null }
+  | { tipo: "antes-da-categoria"; id: string | null };
+
+const mesmoAlvo = (a: Alvo | null, b: Alvo) => !!a && a.tipo === b.tipo && a.id === b.id;
+
 export function ChannelSidebar({
   serverName,
   inviteCode,
   channels,
+  categorias,
+  onOrganizar,
+  onCriarCategoria,
+  onRenomearCategoria,
+  onApagarCategoria,
+  onOpenMembros,
   activeChannelId,
   onSelect,
   isOwner,
@@ -155,13 +217,24 @@ export function ChannelSidebar({
   const [inviteOpen, setInviteOpen] = useState(false);
   const [name, setName] = useState("");
   const [kind, setKind] = useState<"text" | "voice">("text");
+  /** Categoria em que a mesa nova vai nascer ("" = sem categoria). */
+  const [categoriaDaNova, setCategoriaDaNova] = useState("");
   const [saving, setSaving] = useState(false);
   const [renaming, setRenaming] = useState<Channel | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [deleting, setDeleting] = useState<Channel | null>(null);
+  const [recolhidas, setRecolhidas] = useState<Set<string>>(() => new Set());
+  const [arraste, setArraste] = useState<Arraste | null>(null);
+  const [alvo, setAlvo] = useState<Alvo | null>(null);
+  /** Diálogo de categoria: criar (id null) ou renomear. */
+  const [editandoCategoria, setEditandoCategoria] = useState<{
+    id: string | null;
+    nome: string;
+  } | null>(null);
+  const [apagandoCategoria, setApagandoCategoria] = useState<Categoria | null>(null);
 
-  const text = channels.filter((c) => c.kind === "text");
   const voice = channels.filter((c) => c.kind === "voice");
+  const blocos = useMemo(() => montarBlocos(categorias, channels), [categorias, channels]);
 
   const voiceSession = useVoice();
   const { session } = useAuth();
@@ -175,165 +248,400 @@ export function ChannelSidebar({
   const submit = async () => {
     if (!name.trim()) return;
     setSaving(true);
-    await onCreateChannel(name.trim().toLowerCase().replace(/\s+/g, "-"), kind);
+    await onCreateChannel(
+      name.trim().toLowerCase().replace(/\s+/g, "-"),
+      kind,
+      categoriaDaNova || null,
+    );
     setSaving(false);
     setName("");
     setOpen(false);
   };
 
-  const renderGroup = (label: string, list: Channel[], Icon: typeof Hash) => (
-    <div className="mb-4">
-      <p className="text-muted-foreground mb-1 px-2 text-[11px] font-semibold tracking-[0.16em] uppercase">
-        {label}
-      </p>
-      {list.map((c) => {
-        const seated = roster[c.id] ?? [];
-        // A mesa aberta nunca acende: o que chega nela já está sendo lido.
-        const pendente = activeChannelId === c.id ? undefined : naoLidas[c.id];
-        const temNovas = !!pendente && pendente.naoLidas > 0;
-        const mencoes = pendente?.mencoes ?? 0;
-        return (
-          <div key={c.id}>
-            <ContextMenu>
-              <ContextMenuTrigger disabled={!canManage} asChild>
-                <div className="group/mesa relative">
-                  {temNovas && (
-                    <span
-                      aria-hidden
-                      className="bg-foreground absolute top-1/2 -left-2 h-2 w-1 -translate-y-1/2 rounded-r-full"
-                    />
-                  )}
-                  <button
-                    onClick={() => onSelect(c)}
+  const novaMesa = (categoriaId: string | null) => {
+    setCategoriaDaNova(categoriaId ?? "");
+    setOpen(true);
+  };
+
+  /** As funções de `organizacao` devolvem o mesmo objeto quando nada muda. */
+  const organizar = (novos: Bloco<Channel>[]) => {
+    if (novos !== blocos) void onOrganizar(arrumacaoDe(novos));
+  };
+
+  const alternarRecolhida = (id: string) =>
+    setRecolhidas((prev) => {
+      const novo = new Set(prev);
+      if (novo.has(id)) novo.delete(id);
+      else novo.add(id);
+      return novo;
+    });
+
+  // ---------------------------------------------------------------------------
+  // Arrastar e soltar (só para quem arruma o buteco). No celular não há
+  // arrastar nativo; lá valem o "Subir", "Descer" e "Mover para" dos menus.
+  // ---------------------------------------------------------------------------
+
+  const comecarArraste = (e: React.DragEvent, a: Arraste) => {
+    e.stopPropagation();
+    e.dataTransfer.effectAllowed = "move";
+    // O Firefox só começa o arraste se tiver algum dado junto.
+    e.dataTransfer.setData("text/plain", a.id);
+    setArraste(a);
+  };
+
+  const terminarArraste = () => {
+    setArraste(null);
+    setAlvo(null);
+  };
+
+  const soltar = (destino: Alvo) => {
+    if (!arraste) return;
+    if (destino.tipo === "antes-da-mesa")
+      organizar(moverMesa(blocos, arraste.id, { antesDe: destino.id }));
+    else if (destino.tipo === "fim-da-categoria")
+      organizar(moverMesa(blocos, arraste.id, { fimDe: destino.id }));
+    else organizar(moverCategoria(blocos, arraste.id, destino.id));
+    terminarArraste();
+  };
+
+  /** Liga um elemento como alvo, aceitando só o tipo de arraste que faz sentido ali. */
+  const zonaDeSoltura = (aceita: Arraste["tipo"], destino: Alvo) => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (arraste?.tipo !== aceita) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (!mesmoAlvo(alvo, destino)) setAlvo(destino);
+    },
+    onDrop: (e: React.DragEvent) => {
+      if (arraste?.tipo !== aceita) return;
+      e.preventDefault();
+      e.stopPropagation();
+      soltar(destino);
+    },
+  });
+
+  const renderMesa = (c: Channel, bloco: Bloco<Channel>) => {
+    const seated = roster[c.id] ?? [];
+    const Icon = c.kind === "voice" ? Volume2 : Hash;
+    // A mesa aberta nunca acende: o que chega nela já está sendo lido.
+    const pendente = activeChannelId === c.id ? undefined : naoLidas[c.id];
+    const temNovas = !!pendente && pendente.naoLidas > 0;
+    const mencoes = pendente?.mencoes ?? 0;
+    const indice = bloco.mesas.indexOf(c);
+    const outrasCategorias = [
+      ...(bloco.categoria ? [{ id: null as string | null, name: "Sem categoria" }] : []),
+      ...categorias.filter((k) => k.id !== bloco.categoria?.id),
+    ];
+    const destinoAqui: Alvo = { tipo: "antes-da-mesa", id: c.id };
+
+    const acoes = (Item: typeof DropdownMenuItem | typeof ContextMenuItem) => (
+      <>
+        <Item
+          onSelect={() => {
+            setRenameValue(c.name);
+            setRenaming(c);
+          }}
+        >
+          <Pencil className="size-4" /> Renomear
+        </Item>
+        <Item disabled={indice <= 0} onSelect={() => organizar(deslocarMesa(blocos, c.id, -1))}>
+          <ArrowUp className="size-4" /> Subir
+        </Item>
+        <Item
+          disabled={indice >= bloco.mesas.length - 1}
+          onSelect={() => organizar(deslocarMesa(blocos, c.id, 1))}
+        >
+          <ArrowDown className="size-4" /> Descer
+        </Item>
+        <Item className="text-destructive focus:text-destructive" onSelect={() => setDeleting(c)}>
+          <Trash2 className="size-4" /> Apagar mesa
+        </Item>
+      </>
+    );
+
+    return (
+      <div
+        key={c.id}
+        draggable={canManage}
+        onDragStart={(e) => comecarArraste(e, { tipo: "mesa", id: c.id })}
+        onDragEnd={terminarArraste}
+        {...(canManage ? zonaDeSoltura("mesa", destinoAqui) : {})}
+        className={cn(
+          "border-t-2 border-transparent",
+          mesmoAlvo(alvo, destinoAqui) && "border-primary",
+          arraste?.id === c.id && "opacity-40",
+        )}
+      >
+        <ContextMenu>
+          <ContextMenuTrigger disabled={!canManage} asChild>
+            <div className="group/mesa relative">
+              {temNovas && (
+                <span
+                  aria-hidden
+                  className="bg-foreground absolute top-1/2 -left-2 h-2 w-1 -translate-y-1/2 rounded-r-full"
+                />
+              )}
+              <button
+                onClick={() => onSelect(c)}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors",
+                  activeChannelId === c.id
+                    ? "bg-surface-2 text-primary"
+                    : temNovas
+                      ? "text-foreground hover:bg-surface-2/60 font-semibold"
+                      : "text-muted-foreground hover:bg-surface-2/60 hover:text-foreground",
+                )}
+              >
+                <Icon className="size-4 shrink-0" />
+                <span className="truncate">{c.name}</span>
+                {mencoes > 0 && (
+                  <span
+                    title={`${mencoes} ${mencoes === 1 ? "menção" : "menções"}`}
                     className={cn(
-                      "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors",
-                      activeChannelId === c.id
-                        ? "bg-surface-2 text-primary"
-                        : temNovas
-                          ? "text-foreground hover:bg-surface-2/60 font-semibold"
-                          : "text-muted-foreground hover:bg-surface-2/60 hover:text-foreground",
+                      "bg-destructive text-destructive-foreground ml-auto min-w-[18px] shrink-0 rounded-full px-1.5 text-center text-[10px] leading-[18px] font-bold tabular-nums",
+                      canManage && "group-hover/mesa:opacity-0",
                     )}
                   >
-                    <Icon className="size-4 shrink-0" />
-                    <span className="truncate">{c.name}</span>
-                    {mencoes > 0 && (
-                      <span
-                        title={`${mencoes} ${mencoes === 1 ? "menção" : "menções"}`}
-                        className={cn(
-                          "bg-destructive text-destructive-foreground ml-auto min-w-[18px] shrink-0 rounded-full px-1.5 text-center text-[10px] leading-[18px] font-bold tabular-nums",
-                          canManage && "group-hover/mesa:opacity-0",
-                        )}
-                      >
-                        {mencoes > 99 ? "99+" : mencoes}
-                      </span>
+                    {mencoes > 99 ? "99+" : mencoes}
+                  </span>
+                )}
+                {c.kind === "voice" && seated.length > 0 && (
+                  <span
+                    className={cn(
+                      "text-muted-foreground ml-auto shrink-0 text-[10px] tabular-nums",
+                      canManage && "group-hover/mesa:opacity-0",
                     )}
-                    {c.kind === "voice" && seated.length > 0 && (
-                      <span
-                        className={cn(
-                          "text-muted-foreground ml-auto shrink-0 text-[10px] tabular-nums",
-                          canManage && "group-hover/mesa:opacity-0",
-                        )}
-                      >
-                        {seated.length}
-                      </span>
+                  >
+                    {seated.length}
+                  </span>
+                )}
+              </button>
+
+              {canManage && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      title="Ações da mesa"
+                      className="text-muted-foreground hover:text-foreground hover:bg-surface-2 absolute top-1/2 right-1 hidden -translate-y-1/2 rounded p-0.5 group-hover/mesa:block data-[state=open]:block"
+                    >
+                      <MoreVertical className="size-4" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    {acoes(DropdownMenuItem)}
+                    {outrasCategorias.length > 0 && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuSub>
+                          <DropdownMenuSubTrigger>
+                            <FolderInput className="size-4" /> Mover para
+                          </DropdownMenuSubTrigger>
+                          <DropdownMenuSubContent className="w-44">
+                            {outrasCategorias.map((k) => (
+                              <DropdownMenuItem
+                                key={k.id ?? "soltas"}
+                                onSelect={() => organizar(moverMesa(blocos, c.id, { fimDe: k.id }))}
+                              >
+                                <span className="truncate">{k.name}</span>
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuSubContent>
+                        </DropdownMenuSub>
+                      </>
                     )}
-                  </button>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-40">{acoes(ContextMenuItem)}</ContextMenuContent>
+        </ContextMenu>
 
-                  {canManage && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          title="Ações da mesa"
-                          className="text-muted-foreground hover:text-foreground hover:bg-surface-2 absolute top-1/2 right-1 hidden -translate-y-1/2 rounded p-0.5 group-hover/mesa:block data-[state=open]:block"
-                        >
-                          <MoreVertical className="size-4" />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-40">
-                        <DropdownMenuItem
-                          onSelect={() => {
-                            setRenameValue(c.name);
-                            setRenaming(c);
-                          }}
-                        >
-                          <Pencil className="size-4" /> Renomear
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          className="text-destructive focus:text-destructive"
-                          onSelect={() => setDeleting(c)}
-                        >
-                          <Trash2 className="size-4" /> Apagar mesa
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  )}
-                </div>
-              </ContextMenuTrigger>
-              <ContextMenuContent className="w-40">
-                <ContextMenuItem
-                  onSelect={() => {
-                    setRenameValue(c.name);
-                    setRenaming(c);
-                  }}
-                >
-                  <Pencil className="size-4" /> Renomear
-                </ContextMenuItem>
-                <ContextMenuItem
-                  className="text-destructive focus:text-destructive"
-                  onSelect={() => setDeleting(c)}
-                >
-                  <Trash2 className="size-4" /> Apagar mesa
-                </ContextMenuItem>
-              </ContextMenuContent>
-            </ContextMenu>
+        {/* quem está na mesa agora — visível pra todo mundo do buteco */}
+        {c.kind === "voice" && seated.length > 0 && (
+          <ul className="mt-0.5 mb-1 ml-4 flex flex-col gap-1 border-l border-border/60 pl-3">
+            {seated
+              .map((userId) => ({ userId, name: names[userId] ?? "Participante" }))
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map(({ userId, name }) => (
+                <li key={userId}>
+                  <ParticipanteSentado
+                    userId={userId}
+                    name={name}
+                    avatar={avatars[userId]}
+                    falando={
+                      voiceSession.active?.channelId === c.id && !!voiceSession.speaking[userId]
+                    }
+                    ehVoce={userId === meuId}
+                    // Só vale para a mesa em que EU estou: a presença de
+                    // voz que carrega esse estado é a do canal conectado.
+                    micOff={
+                      voiceSession.active?.channelId === c.id &&
+                      !!voiceSession.estadosDeAudio[userId]?.micOff
+                    }
+                  />
+                </li>
+              ))}
+          </ul>
+        )}
+      </div>
+    );
+  };
 
-            {/* quem está na mesa agora — visível pra todo mundo do buteco */}
-            {c.kind === "voice" && seated.length > 0 && (
-              <ul className="mt-0.5 mb-1 ml-4 flex flex-col gap-1 border-l border-border/60 pl-3">
-                {seated
-                  .map((userId) => ({ userId, name: names[userId] ?? "Participante" }))
-                  .sort((a, b) => a.name.localeCompare(b.name))
-                  .map(({ userId, name }) => (
-                    <li key={userId}>
-                      <ParticipanteSentado
-                        userId={userId}
-                        name={name}
-                        avatar={avatars[userId]}
-                        falando={
-                          voiceSession.active?.channelId === c.id && !!voiceSession.speaking[userId]
-                        }
-                        ehVoce={userId === meuId}
-                        // Só vale para a mesa em que EU estou: a presença de
-                        // voz que carrega esse estado é a do canal conectado.
-                        micOff={
-                          voiceSession.active?.channelId === c.id &&
-                          !!voiceSession.estadosDeAudio[userId]?.micOff
-                        }
-                      />
-                    </li>
-                  ))}
-              </ul>
+  const renderBloco = (bloco: Bloco<Channel>, i: number) => {
+    const k = bloco.categoria;
+    if (!k) {
+      // Mesas soltas: sem cabeçalho. Enquanto alguém arrasta uma mesa e não há
+      // nenhuma solta, aparece uma faixa para ter onde soltar.
+      if (bloco.mesas.length === 0) {
+        if (arraste?.tipo !== "mesa") return null;
+        const destino: Alvo = { tipo: "fim-da-categoria", id: null };
+        return (
+          <div
+            key="soltas"
+            {...zonaDeSoltura("mesa", destino)}
+            className={cn(
+              "text-muted-foreground mb-3 rounded-lg border border-dashed px-2 py-2 text-center text-[11px]",
+              mesmoAlvo(alvo, destino) ? "border-primary" : "border-border",
             )}
+          >
+            Solta aqui para ficar sem categoria
           </div>
         );
-      })}
-      {list.length === 0 && <p className="text-muted-foreground px-2 py-1 text-xs">Nenhuma mesa</p>}
-    </div>
-  );
+      }
+      return (
+        <div key="soltas" className="mb-3">
+          {bloco.mesas.map((c) => renderMesa(c, bloco))}
+        </div>
+      );
+    }
+
+    const recolhida = recolhidas.has(k.id);
+    // Recolhida, a categoria ainda mostra a mesa aberta, para ninguém perder de
+    // vista onde está.
+    const visiveis = recolhida ? bloco.mesas.filter((c) => c.id === activeChannelId) : bloco.mesas;
+    const ultima = i === blocos.length - 1;
+    // Mesa solta no cabeçalho vai para o fim da categoria; categoria solta no
+    // cabeçalho de outra toma o lugar dela.
+    const destino: Alvo | null = !arraste
+      ? null
+      : arraste.tipo === "mesa"
+        ? { tipo: "fim-da-categoria", id: k.id }
+        : { tipo: "antes-da-categoria", id: k.id };
+
+    return (
+      <div key={k.id} className="mb-3">
+        <div
+          draggable={canManage}
+          onDragStart={(e) => comecarArraste(e, { tipo: "categoria", id: k.id })}
+          onDragEnd={terminarArraste}
+          onDragOver={(e) => {
+            if (!canManage || !destino) return;
+            e.preventDefault();
+            if (!mesmoAlvo(alvo, destino)) setAlvo(destino);
+          }}
+          onDrop={(e) => {
+            if (!canManage || !destino) return;
+            e.preventDefault();
+            soltar(destino);
+          }}
+          className={cn(
+            "group/categoria flex items-center gap-1 rounded-md border-t-2 border-transparent pr-1",
+            mesmoAlvo(alvo, { tipo: "antes-da-categoria", id: k.id }) && "border-primary",
+            mesmoAlvo(alvo, { tipo: "fim-da-categoria", id: k.id }) && "bg-primary/10",
+            arraste?.id === k.id && "opacity-40",
+          )}
+        >
+          <button
+            onClick={() => alternarRecolhida(k.id)}
+            className="text-muted-foreground hover:text-foreground flex min-w-0 flex-1 items-center gap-1 py-1 pl-0.5 text-left text-[11px] font-semibold tracking-[0.16em] uppercase"
+          >
+            <ChevronDown
+              className={cn("size-3 shrink-0 transition-transform", recolhida && "-rotate-90")}
+            />
+            <span className="truncate">{k.name}</span>
+          </button>
+          {canManage && (
+            <>
+              <button
+                title="Nova mesa nesta categoria"
+                onClick={() => novaMesa(k.id)}
+                className="text-muted-foreground hover:text-foreground hidden rounded p-0.5 group-hover/categoria:block"
+              >
+                <Plus className="size-3.5" />
+              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    title="Ações da categoria"
+                    className="text-muted-foreground hover:text-foreground hidden rounded p-0.5 group-hover/categoria:block data-[state=open]:block"
+                  >
+                    <MoreVertical className="size-3.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem onSelect={() => novaMesa(k.id)}>
+                    <Plus className="size-4" /> Nova mesa aqui
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => setEditandoCategoria({ id: k.id, nome: k.name })}
+                  >
+                    <Pencil className="size-4" /> Renomear
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={i <= 1}
+                    onSelect={() => organizar(deslocarCategoria(blocos, k.id, -1))}
+                  >
+                    <ArrowUp className="size-4" /> Subir
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={ultima}
+                    onSelect={() => organizar(deslocarCategoria(blocos, k.id, 1))}
+                  >
+                    <ArrowDown className="size-4" /> Descer
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="text-destructive focus:text-destructive"
+                    onSelect={() => setApagandoCategoria(k)}
+                  >
+                    <Trash2 className="size-4" /> Apagar categoria
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
+          )}
+        </div>
+        {visiveis.map((c) => renderMesa(c, bloco))}
+        {!recolhida && bloco.mesas.length === 0 && (
+          <p className="text-muted-foreground/70 px-2 py-1 text-xs">Nenhuma mesa</p>
+        )}
+      </div>
+    );
+  };
 
   return (
     <aside className="wood-texture border-border flex h-full w-60 shrink-0 flex-col border-r">
       <div className="border-border flex h-14 items-center justify-between gap-2 border-b px-4">
         <h2 className="font-display truncate text-lg tracking-wide">{serverName}</h2>
-        {canManage && (
+        <div className="ml-auto flex shrink-0 items-center gap-2.5">
           <button
-            onClick={onOpenSettings}
-            title="Configurações do buteco"
-            className="text-muted-foreground hover:text-primary ml-auto shrink-0"
+            onClick={onOpenMembros}
+            title="Quem senta aqui"
+            className="text-muted-foreground hover:text-primary"
           >
-            <Settings className="size-4" />
+            <Users className="size-4" />
           </button>
-        )}
+          {canManage && (
+            <button
+              onClick={onOpenSettings}
+              title="Configurações do buteco"
+              className="text-muted-foreground hover:text-primary"
+            >
+              <Settings className="size-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       {canManage && inviteCode && (
@@ -350,17 +658,40 @@ export function ChannelSidebar({
       )}
 
       <div className="scrollbar-thin flex-1 overflow-y-auto p-2">
-        {renderGroup("Mesas de texto", text, Hash)}
-        {renderGroup("Mesas de voz", voice, Volume2)}
-        {canManage && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start"
-            onClick={() => setOpen(true)}
+        {blocos.map(renderBloco)}
+        {/* Faixa para mandar uma categoria para o fim da lista. */}
+        {arraste?.tipo === "categoria" && (
+          <div
+            {...zonaDeSoltura("categoria", { tipo: "antes-da-categoria", id: null })}
+            className={cn(
+              "text-muted-foreground mb-3 rounded-lg border border-dashed px-2 py-2 text-center text-[11px]",
+              mesmoAlvo(alvo, { tipo: "antes-da-categoria", id: null })
+                ? "border-primary"
+                : "border-border",
+            )}
           >
-            <Plus className="size-4" /> Nova mesa
-          </Button>
+            Solta aqui para ir para o fim
+          </div>
+        )}
+        {canManage && (
+          <div className="flex flex-col">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start"
+              onClick={() => novaMesa(null)}
+            >
+              <Plus className="size-4" /> Nova mesa
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start"
+              onClick={() => setEditandoCategoria({ id: null, nome: "" })}
+            >
+              <FolderPlus className="size-4" /> Nova categoria
+            </Button>
+          </div>
         )}
       </div>
 
@@ -421,6 +752,26 @@ export function ChannelSidebar({
                 </p>
               )}
             </div>
+            {categorias.length > 0 && (
+              <div className="space-y-2">
+                <Label htmlFor="channel-categoria">Categoria</Label>
+                <select
+                  id="channel-categoria"
+                  value={categoriaDaNova}
+                  onChange={(e) => setCategoriaDaNova(e.target.value)}
+                  className="border-input bg-surface/60 focus-visible:ring-ring h-9 w-full rounded-md border px-3 text-sm focus-visible:ring-2 focus-visible:outline-none"
+                >
+                  <option value="">Sem categoria</option>
+                  {[...categorias]
+                    .sort((a, b) => a.position - b.position)
+                    .map((k) => (
+                      <option key={k.id} value={k.id}>
+                        {k.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Tipo</Label>
               <div className="grid grid-cols-2 gap-2">
@@ -524,12 +875,84 @@ export function ChannelSidebar({
         </AlertDialogContent>
       </AlertDialog>
 
+      <Dialog open={!!editandoCategoria} onOpenChange={(o) => !o && setEditandoCategoria(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-display text-2xl tracking-wide">
+              {editandoCategoria?.id ? "Renomear categoria" : "Nova categoria"}
+            </DialogTitle>
+            <DialogDescription>
+              Categoria junta as mesas parecidas, tipo “Jogatina” ou “Papo sério”.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="categoria-nome">Nome da categoria</Label>
+            <Input
+              id="categoria-nome"
+              value={editandoCategoria?.nome ?? ""}
+              maxLength={40}
+              onChange={(e) =>
+                setEditandoCategoria((prev) => (prev ? { ...prev, nome: e.target.value } : prev))
+              }
+              placeholder="Jogatina"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              disabled={!editandoCategoria?.nome.trim() || saving}
+              onClick={async () => {
+                if (!editandoCategoria) return;
+                setSaving(true);
+                const nome = editandoCategoria.nome.trim();
+                if (editandoCategoria.id) await onRenomearCategoria(editandoCategoria.id, nome);
+                else await onCriarCategoria(nome);
+                setSaving(false);
+                setEditandoCategoria(null);
+              }}
+            >
+              {saving ? "Salvando..." : editandoCategoria?.id ? "Renomear" : "Criar categoria"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={!!apagandoCategoria}
+        onOpenChange={(o) => !o && setApagandoCategoria(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-display text-2xl tracking-wide">
+              Apagar a categoria {apagandoCategoria?.name}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Só a categoria some. As mesas dela continuam no buteco, sem categoria, com as
+              conversas intactas.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Deixa quieto</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={async () => {
+                if (!apagandoCategoria) return;
+                await onApagarCategoria(apagandoCategoria.id);
+                setApagandoCategoria(null);
+              }}
+            >
+              Apagar categoria
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {inviteCode && (
         <InviteDialog
           open={inviteOpen}
           onOpenChange={setInviteOpen}
           serverName={serverName}
           inviteCode={inviteCode}
+          serverId={serverId}
           canManage={canManage}
           onRegenerate={onRegenerateInvite}
         />
