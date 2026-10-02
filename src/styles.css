@@ -281,6 +281,35 @@
   }
 }
 
+/* O "chamar atenção" do MSN: a janela de conversa sacode por meio segundo. */
+@utility animate-tremer {
+  animation: tremer 0.6s ease-in-out;
+}
+
+@keyframes tremer {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  10%,
+  50% {
+    translate: -9px 3px;
+  }
+  30%,
+  70% {
+    translate: 9px -3px;
+  }
+  90% {
+    translate: -4px 1px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-tremer {
+    animation: none;
+  }
+}
+
 @keyframes speaking-pulse {
   0%,
   100% {

@@ -9,6 +9,10 @@ export type Profile = {
   avatar_url: string | null;
   bio: string | null;
   birth_date: string | null;
+  /** Status de MSN: tomando_uma, ocupado, saiu_pra_fumar ou invisivel. */
+  status: string;
+  /** A frase embaixo do nome. */
+  subnick: string | null;
 };
 
 type AuthState = {
@@ -42,7 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadProfile = useCallback(async (userId: string) => {
     const { data } = await supabase
       .from("profiles")
-      .select("id, username, display_name, avatar_url, bio, birth_date")
+      .select("id, username, display_name, avatar_url, bio, birth_date, status, subnick")
       .eq("id", userId)
       .maybeSingle();
     setProfile((data as Profile) ?? null);

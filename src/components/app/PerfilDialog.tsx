@@ -4,6 +4,7 @@ import { Heart, MessageCircle, Pencil, Smile, Snowflake, Trash2 } from "lucide-r
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { usePerfil } from "@/lib/perfil";
+import { useConversas } from "@/lib/conversas";
 import { cn } from "@/lib/utils";
 import { Bottlecap } from "@/components/Bottlecap";
 import { Button } from "@/components/ui/button";
@@ -44,14 +45,12 @@ function quando(iso: string) {
 export function PerfilDialog({
   meuId,
   onEditarMeuPerfil,
-  onConversar,
 }: {
   meuId: string;
   onEditarMeuPerfil: () => void;
-  /** Abre a conversa privada (janela do MSN) com a pessoa. */
-  onConversar?: (userId: string) => void;
 }) {
   const { aberto, fecharPerfil } = usePerfil();
+  const { abrirConversa } = useConversas();
   const id = aberto;
   const souEu = id === meuId;
   const qc = useQueryClient();
@@ -237,17 +236,15 @@ export function PerfilDialog({
                   <Pencil className="size-4" /> Editar meu perfil
                 </Button>
               ) : (
-                onConversar && (
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      fecharPerfil();
-                      onConversar(id!);
-                    }}
-                  >
-                    <MessageCircle className="size-4" /> Conversar
-                  </Button>
-                )
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    fecharPerfil();
+                    abrirConversa(id!);
+                  }}
+                >
+                  <MessageCircle className="size-4" /> Conversar
+                </Button>
               )}
             </aside>
 

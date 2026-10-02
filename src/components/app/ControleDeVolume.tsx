@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
-import { MicOff, UserRound, Volume2, VolumeX } from "lucide-react";
+import { MessageCircle, MicOff, UserRound, Volume2, VolumeX } from "lucide-react";
 import { usePerfil } from "@/lib/perfil";
+import { useConversas } from "@/lib/conversas";
 import { useVoice } from "@/lib/voice";
 import { AUDIO_DO_PARTICIPANTE_PADRAO } from "@/lib/mediaPrefs";
 import { VOLUME_MAXIMO } from "@/lib/saidaDeAudio";
@@ -59,6 +60,7 @@ export function ControleDeVolume({
 }) {
   const { percent, muted, definir, alternarMudo } = useAudioDoParticipante(userId);
   const { abrirPerfil } = usePerfil();
+  const { abrirConversa } = useConversas();
   // O som da tela de alguém usa o mesmo controle, com a chave "tela:<id>";
   // esse não tem perfil para abrir.
   const pessoa = userId.startsWith("tela:") ? null : userId;
@@ -116,13 +118,22 @@ export function ControleDeVolume({
         </p>
 
         {pessoa && (
-          <button
-            type="button"
-            onClick={() => abrirPerfil(pessoa)}
-            className="hover:bg-muted text-muted-foreground hover:text-foreground -mx-1 flex w-[calc(100%+0.5rem)] items-center gap-2 rounded-md px-1 py-1.5 text-left text-xs transition-colors"
-          >
-            <UserRound className="size-3.5" /> Ver o perfil de {name}
-          </button>
+          <div className="-mx-1 flex flex-col">
+            <button
+              type="button"
+              onClick={() => abrirPerfil(pessoa)}
+              className="hover:bg-muted text-muted-foreground hover:text-foreground flex items-center gap-2 rounded-md px-1 py-1.5 text-left text-xs transition-colors"
+            >
+              <UserRound className="size-3.5" /> Ver o perfil de {name}
+            </button>
+            <button
+              type="button"
+              onClick={() => abrirConversa(pessoa)}
+              className="hover:bg-muted text-muted-foreground hover:text-foreground flex items-center gap-2 rounded-md px-1 py-1.5 text-left text-xs transition-colors"
+            >
+              <MessageCircle className="size-3.5" /> Conversar com {name}
+            </button>
+          </div>
         )}
       </PopoverContent>
     </Popover>

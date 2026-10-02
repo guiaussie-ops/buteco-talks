@@ -7,10 +7,7 @@ import {
   FolderPlus,
   Hash,
   LayoutGrid,
-  LogOut,
   Plus,
-  ShieldAlert,
-  ShieldCheck,
   UserPlus,
   Users,
   Volume2,
@@ -30,6 +27,8 @@ import {
 import { Bottlecap } from "@/components/Bottlecap";
 import { InviteDialog } from "@/components/app/InviteDialog";
 import { Letreiro, type ServerItem } from "@/components/app/Letreiro";
+import { DockDeConversas } from "@/components/app/Conversas";
+import { MeuStatus } from "@/components/app/MeuStatus";
 import { MiniMesa } from "@/components/app/Mesas";
 import { VoiceBar } from "@/components/app/VoiceBar";
 import { useVoice } from "@/lib/voice";
@@ -114,7 +113,6 @@ type Props = {
     kind: "text" | "voice",
     categoryId: string | null,
   ) => Promise<void>;
-  displayName: string;
   isAdult: boolean;
   onSignOut: () => void;
   onOpenVoiceRoom: (channelId: string) => void;
@@ -131,9 +129,6 @@ type Props = {
   onRenameChannel: (channelId: string, name: string) => Promise<void>;
   onDeleteChannel: (channelId: string) => Promise<void>;
   onRegenerateInvite: () => Promise<void>;
-  onOpenAccount: () => void;
-  /** foto do usuario logado; sem ela fica a tampinha */
-  avatarUrl: string | null;
   /** foto de cada membro do buteco, por id */
   avatars: Record<string, string | null>;
 };
@@ -225,7 +220,6 @@ export function ChannelSidebar({
   onSelect,
   isOwner,
   onCreateChannel,
-  displayName,
   isAdult,
   onSignOut,
   onOpenVoiceRoom,
@@ -239,8 +233,6 @@ export function ChannelSidebar({
   onRenameChannel,
   onDeleteChannel,
   onRegenerateInvite,
-  onOpenAccount,
-  avatarUrl,
   avatars,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -731,34 +723,8 @@ export function ChannelSidebar({
 
       <VoiceBar onOpenRoom={onOpenVoiceRoom} />
 
-      <div className="border-border bg-rail flex items-center gap-2 border-t px-3 py-2.5">
-        <button
-          onClick={() => (meuId ? abrirPerfil(meuId) : onOpenAccount())}
-          title="Meu perfil"
-          className="hover:bg-surface-2/60 -mx-1 flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-0.5 text-left transition-colors"
-        >
-          <Bottlecap name={displayName} src={avatarUrl} className="size-9" />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium">{displayName}</span>
-            <span
-              className={cn(
-                "flex items-center gap-1 text-[11px]",
-                isAdult ? "text-primary" : "text-neon",
-              )}
-            >
-              {isAdult ? <ShieldCheck className="size-3" /> : <ShieldAlert className="size-3" />}
-              {isAdult ? "Tela liberada" : "Modo protegido"}
-            </span>
-          </span>
-        </button>
-        <button
-          onClick={onSignOut}
-          className="text-muted-foreground hover:text-destructive"
-          title="Sair"
-        >
-          <LogOut className="size-4" />
-        </button>
-      </div>
+      <DockDeConversas />
+      <MeuStatus onSignOut={onSignOut} isAdult={isAdult} />
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>

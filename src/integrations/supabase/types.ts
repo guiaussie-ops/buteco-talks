@@ -117,6 +117,51 @@ export type Database = {
           },
         ]
       }
+      mensagens_privadas: {
+        Row: {
+          created_at: string
+          de_id: string
+          id: string
+          lida_em: string | null
+          para_id: string
+          texto: string
+          tipo: string
+        }
+        Insert: {
+          created_at?: string
+          de_id: string
+          id?: string
+          lida_em?: string | null
+          para_id: string
+          texto?: string
+          tipo?: string
+        }
+        Update: {
+          created_at?: string
+          de_id?: string
+          id?: string
+          lida_em?: string | null
+          para_id?: string
+          texto?: string
+          tipo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mensagens_privadas_de_id_fkey"
+            columns: ["de_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mensagens_privadas_para_id_fkey"
+            columns: ["para_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       message_reactions: {
         Row: {
           channel_id: string
@@ -212,6 +257,8 @@ export type Database = {
           created_at: string
           display_name: string
           id: string
+          status: string
+          subnick: string | null
           username: string
         }
         Insert: {
@@ -221,6 +268,8 @@ export type Database = {
           created_at?: string
           display_name: string
           id: string
+          status?: string
+          subnick?: string | null
           username: string
         }
         Update: {
@@ -230,6 +279,8 @@ export type Database = {
           created_at?: string
           display_name?: string
           id?: string
+          status?: string
+          subnick?: string | null
           username?: string
         }
         Relationships: []

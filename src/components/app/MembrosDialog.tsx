@@ -4,6 +4,7 @@ import {
   Crown,
   DoorOpen,
   Gavel,
+  MessageCircle,
   MoreVertical,
   Search,
   Shield,
@@ -13,6 +14,8 @@ import {
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { usePerfil } from "@/lib/perfil";
+import { useConversas } from "@/lib/conversas";
+import { STATUS, type Status } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { Bottlecap } from "@/components/Bottlecap";
 import { Button } from "@/components/ui/button";
@@ -71,6 +74,9 @@ type Props = {
   avatars: Record<string, string | null>;
   usernames: Record<string, string>;
   roles: Record<string, string>;
+  /** Quem está com o app aberto neste buteco, e com que status. */
+  online: Record<string, Status>;
+  subnicks: Record<string, string | null>;
   onSair: () => Promise<void>;
 };
 
@@ -117,10 +123,13 @@ export function MembrosDialog({
   avatars,
   usernames,
   roles,
+  online,
+  subnicks,
   onSair,
 }: Props) {
   const qc = useQueryClient();
   const { abrirPerfil } = usePerfil();
+  const { abrirConversa } = useConversas();
   const [busca, setBusca] = useState("");
   const [expulsando, setExpulsando] = useState<Pessoa | null>(null);
   const [banindo, setBanindo] = useState<Pessoa | null>(null);
@@ -145,8 +154,13 @@ export function MembrosDialog({
           p.name.toLowerCase().includes(termo) ||
           p.username.toLowerCase().includes(termo),
       )
-      .sort((a, b) => PESO[b.cargo] - PESO[a.cargo] || a.name.localeCompare(b.name));
-  }, [roles, names, usernames, ownerId, busca]);
+      .sort(
+        (a, b) =>
+          PESO[b.cargo] - PESO[a.cargo] ||
+          Number(b.userId in online) - Number(a.userId in online) ||
+          a.name.localeCompare(b.name),
+      );
+  }, [roles, names, usernames, ownerId, busca, online]);
 
   const banidosQuery = useQuery({
     queryKey: ["banidos", serverId],
@@ -219,11 +233,20 @@ export function MembrosDialog({
               key={p.userId}
               className="hover:bg-surface-2/60 flex items-center gap-3 rounded-lg px-2 py-1.5"
             >
-              <Bottlecap
-                name={p.name}
-                src={avatars[p.userId]}
-                className="size-8 shrink-0 text-xs"
-              />
+              <span
+                className={cn("relative shrink-0", !(p.userId in online) && "opacity-60")}
+                title={p.userId in online ? STATUS[online[p.userId]!].rotulo : "fora do bar agora"}
+              >
+                <Bottlecap name={p.name} src={avatars[p.userId]} className="size-8 text-xs" />
+                {p.userId in online && (
+                  <span
+                    className={cn(
+                      "border-background absolute -right-0.5 -bottom-0.5 size-3 rounded-full border-2",
+                      STATUS[online[p.userId]!].cor,
+                    )}
+                  />
+                )}
+              </span>
               <div className="min-w-0 flex-1">
                 <p className="flex items-center gap-2">
                   <button
@@ -237,9 +260,26 @@ export function MembrosDialog({
                     <span className="text-muted-foreground text-[11px]">(você)</span>
                   )}
                 </p>
-                <p className="text-muted-foreground truncate text-xs">@{p.username}</p>
+                <p className="text-muted-foreground truncate text-xs">
+                  {subnicks[p.userId] ? (
+                    <span className="italic">{subnicks[p.userId]}</span>
+                  ) : (
+                    <>@{p.username}</>
+                  )}
+                </p>
               </div>
               <SeloDeCargo cargo={p.cargo} />
+              {p.userId !== userId && (
+                <button
+                  type="button"
+                  onClick={() => abrirConversa(p.userId)}
+                  aria-label={`Conversar com ${p.name}`}
+                  title="Conversar"
+                  className="text-muted-foreground hover:text-foreground hover:bg-surface-2 rounded p-1"
+                >
+                  <MessageCircle className="size-4" />
+                </button>
+              )}
               {temAcoes ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
