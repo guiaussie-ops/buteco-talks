@@ -111,28 +111,36 @@ function ler(): MediaPrefs {
   try {
     const cru = window.localStorage.getItem(CHAVE);
     if (!cru) return MEDIA_PREFS_PADRAO;
-    const salvo = JSON.parse(cru) as Partial<MediaPrefs>;
-    // Mescla com o padrão: uma preferência gravada por uma versão antiga do app
-    // pode não ter todos os campos.
-    return {
-      ...MEDIA_PREFS_PADRAO,
-      ...salvo,
-      inputGain: clamp(salvo.inputGain ?? 1, 0, 2),
-      outputVolume: clamp(salvo.outputVolume ?? 1, 0, 1),
-      peerAudio: lerPeerAudio(salvo),
-      // `??` e não `!!`: campo ausente (preferência gravada por uma versão
-      // antiga) tem que cair no padrão, não virar false na marra.
-      echoCancellation: salvo.echoCancellation ?? MEDIA_PREFS_PADRAO.echoCancellation,
-      noiseSuppression: salvo.noiseSuppression ?? MEDIA_PREFS_PADRAO.noiseSuppression,
-      autoGainControl: salvo.autoGainControl ?? MEDIA_PREFS_PADRAO.autoGainControl,
-      noiseGate: salvo.noiseGate ?? MEDIA_PREFS_PADRAO.noiseGate,
-      noiseGateThreshold: clamp(salvo.noiseGateThreshold ?? LIMIAR_PADRAO, 0, LIMIAR_MAXIMO),
-      noiseSuppressionIA: salvo.noiseSuppressionIA ?? MEDIA_PREFS_PADRAO.noiseSuppressionIA,
-    };
+    return normalizarPrefs(JSON.parse(cru));
   } catch {
     // Janela anônima, storage bloqueado, JSON corrompido: segue no padrão.
     return MEDIA_PREFS_PADRAO;
   }
+}
+
+/**
+ * Transforma o que estava gravado em preferências válidas. Mescla com o
+ * padrão, porque uma preferência gravada por uma versão antiga do app pode
+ * não ter todos os campos, e prende cada número na faixa dele.
+ */
+export function normalizarPrefs(cru: unknown): MediaPrefs {
+  if (!cru || typeof cru !== "object") return MEDIA_PREFS_PADRAO;
+  const salvo = cru as Partial<MediaPrefs>;
+  return {
+    ...MEDIA_PREFS_PADRAO,
+    ...salvo,
+    inputGain: clamp(salvo.inputGain ?? 1, 0, 2),
+    outputVolume: clamp(salvo.outputVolume ?? 1, 0, 1),
+    peerAudio: lerPeerAudio(salvo),
+    // `??` e não `!!`: campo ausente (preferência gravada por uma versão
+    // antiga) tem que cair no padrão, não virar false na marra.
+    echoCancellation: salvo.echoCancellation ?? MEDIA_PREFS_PADRAO.echoCancellation,
+    noiseSuppression: salvo.noiseSuppression ?? MEDIA_PREFS_PADRAO.noiseSuppression,
+    autoGainControl: salvo.autoGainControl ?? MEDIA_PREFS_PADRAO.autoGainControl,
+    noiseGate: salvo.noiseGate ?? MEDIA_PREFS_PADRAO.noiseGate,
+    noiseGateThreshold: clamp(salvo.noiseGateThreshold ?? LIMIAR_PADRAO, 0, LIMIAR_MAXIMO),
+    noiseSuppressionIA: salvo.noiseSuppressionIA ?? MEDIA_PREFS_PADRAO.noiseSuppressionIA,
+  };
 }
 
 /**
