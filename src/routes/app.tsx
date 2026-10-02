@@ -17,6 +17,8 @@ import { VoicePanel } from "@/components/app/VoicePanel";
 import { TelaCheia } from "@/components/app/TelaCheia";
 import { NaTelaAgora, useTemTelaAgora } from "@/components/app/NaTelaAgora";
 import { BarraDoCelular, Gaveta } from "@/components/app/Gaveta";
+import { ColunaDireita } from "@/components/app/ColunaDireita";
+import { Participantes } from "@/components/app/Participantes";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Salao } from "@/components/app/Salao";
 import { PerfilDialog } from "@/components/app/PerfilDialog";
@@ -79,15 +81,29 @@ function AppPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [membrosOpen, setMembrosOpen] = useState(false);
-  /** No celular, qual gaveta está aberta: a das mesas, a das telas ou nenhuma. */
-  const [gaveta, setGaveta] = useState<"mesas" | "telas" | null>(null);
+  /** No celular, qual gaveta está aberta: a das mesas, a da direita ou nenhuma. */
+  const [gaveta, setGaveta] = useState<"mesas" | "direita" | null>(null);
+  /**
+   * Lista de quem tá no bar aberta ou escondida, no computador. Lembrada só
+   * neste navegador: é conforto de quem usa, não dado de ninguém.
+   */
+  const [mostrarParticipantes, setMostrarParticipantesState] = useState(() => {
+    try {
+      return window.localStorage.getItem("buteco:participantes") !== "escondidos";
+    } catch {
+      return true;
+    }
+  });
+  const setMostrarParticipantes = (mostrar: boolean) => {
+    setMostrarParticipantesState(mostrar);
+    try {
+      window.localStorage.setItem("buteco:participantes", mostrar ? "visiveis" : "escondidos");
+    } catch {
+      // Sem storage a escolha vale só nesta sessão.
+    }
+  };
   const celular = useIsMobile();
   const temTelas = useTemTelaAgora();
-  // A última transmissão acabou com a gaveta das telas aberta: fecha, em vez
-  // de deixar o fundo escuro cobrindo uma gaveta vazia.
-  useEffect(() => {
-    if (gaveta === "telas" && !temTelas) setGaveta(null);
-  }, [gaveta, temTelas]);
   const [serverName, setServerName] = useState("");
   const [inviteInput, setInviteInput] = useState("");
 
@@ -170,6 +186,10 @@ function AppPage() {
     [channels],
   );
   const roster = useVoiceRoster(activeServerId, idsDeVoz, voice.active?.channelId ?? null);
+  const nomesDasMesas = useMemo(
+    () => Object.fromEntries(channels.map((c) => [c.id, c.name])),
+    [channels],
+  );
 
   useEffect(() => {
     if (!activeServerId || !activeChannel) return;
@@ -584,7 +604,7 @@ function AppPage() {
                     titulo={activeServer.name}
                     temTelas={temTelas}
                     onAbrirMesas={() => setGaveta("mesas")}
-                    onAbrirTelas={() => setGaveta("telas")}
+                    onAbrirDireita={() => setGaveta("direita")}
                   />
                 )}
                 <div className="flex min-h-0 flex-1">
@@ -642,11 +662,34 @@ function AppPage() {
               </div>
               <Gaveta
                 lado="direita"
-                aberta={gaveta === "telas"}
+                aberta={gaveta === "direita"}
                 onFechar={() => setGaveta(null)}
-                rotulo="Transmissões"
+                rotulo="Quem tá no bar"
               >
-                <NaTelaAgora names={names} avatars={avatars} isAdult={isAdult} />
+                <ColunaDireita
+                  telas={
+                    temTelas ? (
+                      <NaTelaAgora names={names} avatars={avatars} isAdult={isAdult} />
+                    ) : null
+                  }
+                  mostrarParticipantes={celular || mostrarParticipantes}
+                  onMostrarParticipantes={() => setMostrarParticipantes(true)}
+                  participantes={
+                    <Participantes
+                      ownerId={activeServer.owner_id}
+                      roles={roles}
+                      names={names}
+                      avatars={avatars}
+                      subnicks={subnicks}
+                      online={online}
+                      roster={roster}
+                      nomesDasMesas={nomesDasMesas}
+                      podeGerenciar={canModerate}
+                      onGerenciar={() => setMembrosOpen(true)}
+                      onEsconder={celular ? undefined : () => setMostrarParticipantes(false)}
+                    />
+                  }
+                />
               </Gaveta>
             </>
           ) : (

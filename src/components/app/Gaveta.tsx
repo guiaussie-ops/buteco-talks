@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from "react";
-import { Menu, MonitorPlay } from "lucide-react";
+import { Menu, Users } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 
@@ -58,19 +58,20 @@ export function Gaveta({
 }
 
 /**
- * Barra de cima, só no celular: abre a gaveta das mesas à esquerda e, quando
- * tem alguém transmitindo, a das telas à direita.
+ * Barra de cima, só no celular: abre a gaveta das mesas à esquerda e a da
+ * direita (quem tá no bar e as transmissões). O ponto neon no botão da direita
+ * avisa que tem alguém transmitindo.
  */
 export function BarraDoCelular({
   titulo,
   temTelas,
   onAbrirMesas,
-  onAbrirTelas,
+  onAbrirDireita,
 }: {
   titulo: string;
   temTelas: boolean;
   onAbrirMesas: () => void;
-  onAbrirTelas: () => void;
+  onAbrirDireita: () => void;
 }) {
   return (
     <div className="border-border bg-rail flex h-12 shrink-0 items-center gap-2 border-b px-2">
@@ -85,16 +86,17 @@ export function BarraDoCelular({
       <span className="neon-sign font-display min-w-0 flex-1 truncate text-xl tracking-wider">
         {titulo}
       </span>
-      {temTelas && (
-        <button
-          type="button"
-          onClick={onAbrirTelas}
-          aria-label="Abrir as transmissões"
-          className="text-neon hover:bg-surface-2 flex size-10 items-center justify-center rounded-lg"
-        >
-          <MonitorPlay className="size-5" />
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={onAbrirDireita}
+        aria-label={temTelas ? "Quem tá no bar e as transmissões" : "Quem tá no bar"}
+        className="hover:bg-surface-2 relative flex size-10 items-center justify-center rounded-lg"
+      >
+        <Users className="size-5" />
+        {temTelas && (
+          <span className="bg-neon absolute top-2 right-2 size-2 rounded-full shadow-[0_0_6px_var(--color-neon)]" />
+        )}
+      </button>
     </div>
   );
 }

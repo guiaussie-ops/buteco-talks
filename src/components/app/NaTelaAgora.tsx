@@ -173,7 +173,7 @@ function Miniatura({
 }
 
 /**
- * Coluna da direita: as transmissões da mesa de voz em que você está sentado,
+ * As transmissões da mesa de voz em que você está sentado,
  * em miniatura e sem som, em qualquer tela do buteco — inclusive com você
  * lendo uma mesa de texto. O som só vem da que você escolher.
  */
@@ -193,7 +193,7 @@ export function NaTelaAgora({
   const transmissoes = Object.entries(voice.transmissoes);
 
   return (
-    <aside className="border-border bg-rail flex h-full w-72 shrink-0 flex-col border-l">
+    <section className="flex min-h-0 flex-1 flex-col">
       <header className="border-border flex h-14 shrink-0 items-center gap-2 border-b px-4">
         <span className="bg-neon size-2 rounded-full shadow-[0_0_8px_var(--color-neon)]" />
         <h2 className="font-display text-xl tracking-wide">Na tela agora</h2>
@@ -248,6 +248,6 @@ export function NaTelaAgora({
           </button>
         )}
       </div>
-    </aside>
+    </section>
   );
 }
