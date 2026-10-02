@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AtSign, ImageUp, KeyRound, Loader2, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { REGRA_DA_SENHA, mensagemDeErroDaSenha, problemaDaSenha } from "@/lib/senha";
 import { useAuth } from "@/lib/auth";
 import { Bottlecap } from "@/components/Bottlecap";
 import { Button } from "@/components/ui/button";
@@ -174,8 +175,9 @@ export function AccountSettingsDialog({ open, onOpenChange }: Props) {
   };
 
   const trocarSenha = async () => {
-    if (newPassword.length < 6) {
-      toast.error("A senha nova precisa de pelo menos 6 caracteres.");
+    const fraca = problemaDaSenha(newPassword);
+    if (fraca) {
+      toast.error(fraca);
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -199,7 +201,7 @@ export function AccountSettingsDialog({ open, onOpenChange }: Props) {
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     setSavingPassword(false);
     if (error) {
-      toast.error("Não consegui trocar a senha: " + error.message);
+      toast.error("Não consegui trocar a senha: " + mensagemDeErroDaSenha(error.message));
       return;
     }
     setCurrentPassword("");
@@ -368,7 +370,11 @@ export function AccountSettingsDialog({ open, onOpenChange }: Props) {
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="Senha nova"
+                aria-describedby="regra-da-senha-nova"
               />
+              <p id="regra-da-senha-nova" className="text-muted-foreground text-xs">
+                {REGRA_DA_SENHA}
+              </p>
               <Input
                 type="password"
                 autoComplete="new-password"

@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { REGRA_DA_SENHA, SENHA_MINIMA, mensagemDeErroDaSenha, problemaDaSenha } from "@/lib/senha";
 import { useAuth, calcAge } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -99,6 +100,11 @@ function AuthPage() {
       toast.error("É preciso ter pelo menos 13 anos para criar uma conta.");
       return;
     }
+    const fraca = problemaDaSenha(password);
+    if (fraca) {
+      toast.error(fraca);
+      return;
+    }
     setLoading(true);
     const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
@@ -117,7 +123,7 @@ function AuthPage() {
       toast.error(
         error.message.includes("already registered")
           ? "Esse e-mail já tem conta. Faça login."
-          : "Não consegui criar a conta: " + error.message,
+          : "Não consegui criar a conta: " + mensagemDeErroDaSenha(error.message),
       );
       return;
     }
@@ -231,10 +237,15 @@ function AuthPage() {
                     id="signup-password"
                     type="password"
                     required
-                    minLength={6}
+                    minLength={SENHA_MINIMA}
+                    autoComplete="new-password"
+                    aria-describedby="regra-da-senha"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                   />
+                  <p id="regra-da-senha" className="text-muted-foreground text-xs">
+                    {REGRA_DA_SENHA}
+                  </p>
                 </div>
                 <Button type="submit" className="w-full" disabled={loading}>
                   {loading ? "Criando..." : "Criar minha conta"}
