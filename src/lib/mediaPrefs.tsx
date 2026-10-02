@@ -77,6 +77,11 @@ export type MediaPrefs = {
    * conferir no A/B do teste de microfone.
    */
   noiseSuppressionIA: boolean;
+  /**
+   * Sons do bar: o "tssss" de quem chega, o "plim" de mensagem privada e o
+   * zumbido do chamar atenção. Ligados por padrão, como no MSN.
+   */
+  sons: boolean;
 };
 
 export const MEDIA_PREFS_PADRAO: MediaPrefs = {
@@ -92,6 +97,7 @@ export const MEDIA_PREFS_PADRAO: MediaPrefs = {
   noiseGate: false,
   noiseGateThreshold: LIMIAR_PADRAO,
   noiseSuppressionIA: false,
+  sons: true,
 };
 
 const CHAVE = "buteco:media-prefs";
@@ -140,6 +146,7 @@ export function normalizarPrefs(cru: unknown): MediaPrefs {
     noiseGate: salvo.noiseGate ?? MEDIA_PREFS_PADRAO.noiseGate,
     noiseGateThreshold: clamp(salvo.noiseGateThreshold ?? LIMIAR_PADRAO, 0, LIMIAR_MAXIMO),
     noiseSuppressionIA: salvo.noiseSuppressionIA ?? MEDIA_PREFS_PADRAO.noiseSuppressionIA,
+    sons: salvo.sons ?? MEDIA_PREFS_PADRAO.sons,
   };
 }
 

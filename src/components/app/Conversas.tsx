@@ -10,6 +10,7 @@ import {
   type Janela,
   type MensagemPrivada,
 } from "@/lib/conversas";
+import { tocarAtencao } from "@/lib/sons";
 import { usePerfil } from "@/lib/perfil";
 import { STATUS, statusDe } from "@/lib/status";
 import { cn } from "@/lib/utils";
@@ -55,7 +56,7 @@ function JanelaDeConversa({
   meuNome: string;
   indice: number;
 }) {
-  const { minimizar, fechar } = useConversas();
+  const { minimizar, fechar, comSom } = useConversas();
   const { abrirPerfil } = usePerfil();
   const qc = useQueryClient();
   const outro = janela.userId;
@@ -133,8 +134,9 @@ function JanelaDeConversa({
         return;
       }
       ultimaAtencaoRef.current = agora;
-      // Quem chama também vê a janela sacudir, como no MSN.
+      // Quem chama também vê a janela sacudir (e ouve), como no MSN.
       setTremendo(true);
+      if (comSom) tocarAtencao();
       window.setTimeout(() => setTremendo(false), 650);
     }
     setEnviando(true);

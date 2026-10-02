@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { statusDe, type Status } from "@/lib/status";
+import { tocarChegada } from "@/lib/sons";
 
 /**
  * Quem está com o app aberto neste buteco agora, e com que status. É a lista
@@ -20,12 +21,15 @@ export function usePresencaNoBar({
   meuId,
   meuStatus,
   nomeDe,
+  comSom,
 }: {
   serverId: string | null;
   serverName: string;
   meuId: string | null;
   meuStatus: string;
   nomeDe: (userId: string) => string;
+  /** Tocar o "tssss" quando alguém chega. */
+  comSom: boolean;
 }) {
   const [online, setOnline] = useState<Record<string, Status>>({});
   const canalRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
@@ -36,6 +40,8 @@ export function usePresencaNoBar({
   const status = statusDe(meuStatus);
   const statusRef = useRef(status);
   statusRef.current = status;
+  const comSomRef = useRef(comSom);
+  comSomRef.current = comSom;
 
   useEffect(() => {
     if (!serverId || !meuId) {
@@ -66,6 +72,7 @@ export function usePresencaNoBar({
         toast(`${nomeDeRef.current(key)} acabou de entrar no ${serverNameRef.current}`, {
           duration: 4000,
         });
+        if (comSomRef.current) tocarChegada();
       })
       .subscribe((estado) => {
         if (estado === "SUBSCRIBED" && statusRef.current !== "invisivel") {

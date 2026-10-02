@@ -29,6 +29,11 @@ describe("normalizarPrefs", () => {
     expect(prefs.noiseSuppressionIA).toBe(false);
   });
 
+  it("sons do bar: ligados por padrão, desligados quando a pessoa desligou", () => {
+    expect(normalizarPrefs({}).sons).toBe(true);
+    expect(normalizarPrefs({ sons: false }).sons).toBe(false);
+  });
+
   it("respeita um filtro desligado de propósito (false não vira padrão)", () => {
     const prefs = normalizarPrefs({ noiseSuppression: false, autoGainControl: false });
     expect(prefs.noiseSuppression).toBe(false);

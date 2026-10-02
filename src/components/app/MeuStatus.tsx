@@ -1,5 +1,14 @@
 import { useState } from "react";
-import { ChevronDown, LogOut, Music2, ShieldAlert, ShieldCheck } from "lucide-react";
+import {
+  BellOff,
+  BellRing,
+  ChevronDown,
+  LogOut,
+  Music2,
+  ShieldAlert,
+  ShieldCheck,
+} from "lucide-react";
+import { useMediaPrefs } from "@/lib/mediaPrefs";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
@@ -11,6 +20,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
@@ -22,6 +32,7 @@ import {
 export function MeuStatus({ onSignOut, isAdult }: { onSignOut: () => void; isAdult: boolean }) {
   const { profile, refreshProfile } = useAuth();
   const { abrirPerfil } = usePerfil();
+  const { prefs, setPrefs } = useMediaPrefs();
   const [editando, setEditando] = useState(false);
   const [rascunho, setRascunho] = useState("");
   if (!profile) return null;
@@ -81,6 +92,11 @@ export function MeuStatus({ onSignOut, isAdult }: { onSignOut: () => void; isAdu
                   {STATUS[s].rotulo}
                 </DropdownMenuItem>
               ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => setPrefs({ sons: !prefs.sons })}>
+                {prefs.sons ? <BellOff className="size-4" /> : <BellRing className="size-4" />}
+                {prefs.sons ? "Desligar os sons do bar" : "Ligar os sons do bar"}
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

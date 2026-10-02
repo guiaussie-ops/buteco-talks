@@ -11,6 +11,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { tocarAtencao, tocarMensagem } from "@/lib/sons";
 
 export type MensagemPrivada = {
   id: string;
@@ -40,6 +41,8 @@ type Ctx = {
   abrirConversa: (userId: string) => void;
   minimizar: (userId: string) => void;
   fechar: (userId: string) => void;
+  /** Se os sons estão valendo agora (preferência, fone mudo, status ocupado). */
+  comSom: boolean;
 };
 
 const ConversasContext = createContext<Ctx | null>(null);
@@ -57,9 +60,11 @@ export const chaveDaConversa = (outro: string) => ["conversa", outro] as const;
 export function ConversasProvider({
   meuId,
   nomeDe,
+  comSom,
   children,
 }: {
   meuId: string;
+  comSom: boolean;
   /** Nome de alguém, para o aviso de mensagem nova. */
   nomeDe: (userId: string) => string;
   children: ReactNode;
@@ -70,6 +75,8 @@ export function ConversasProvider({
   janelasRef.current = janelas;
   const nomeDeRef = useRef(nomeDe);
   nomeDeRef.current = nomeDe;
+  const comSomRef = useRef(comSom);
+  comSomRef.current = comSom;
 
   const abrirConversa = useCallback((userId: string) => {
     setJanelas((prev) =>
@@ -156,6 +163,14 @@ export function ConversasProvider({
             );
           });
 
+          // Chamar atenção sempre faz barulho; mensagem comum só quando a
+          // conversa não está à vista (ou a aba está em segundo plano).
+          const aVista = !!atual && !atual.minimizada && document.visibilityState === "visible";
+          if (comSomRef.current) {
+            if (atencao) tocarAtencao();
+            else if (!aVista) tocarMensagem();
+          }
+
           // Aviso só quando a conversa não está à vista.
           if (!atual || atual.minimizada) {
             const nome = nomeDeRef.current(msg.de_id);
@@ -188,8 +203,8 @@ export function ConversasProvider({
   }, [meuId, qc, abrirConversa]);
 
   const value = useMemo(
-    () => ({ janelas, abrirConversa, minimizar, fechar }),
-    [janelas, abrirConversa, minimizar, fechar],
+    () => ({ janelas, abrirConversa, minimizar, fechar, comSom }),
+    [janelas, abrirConversa, minimizar, fechar, comSom],
   );
   return <ConversasContext.Provider value={value}>{children}</ConversasContext.Provider>;
 }
@@ -202,6 +217,7 @@ export function useConversas(): Ctx {
       abrirConversa: () => undefined,
       minimizar: () => undefined,
       fechar: () => undefined,
+      comSom: false,
     }
   );
 }

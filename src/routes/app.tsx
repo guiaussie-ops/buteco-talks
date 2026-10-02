@@ -24,6 +24,9 @@ import { PerfilProvider } from "@/lib/perfil";
 import { ConversasProvider } from "@/lib/conversas";
 import { JanelasDeConversa } from "@/components/app/Conversas";
 import { usePresencaNoBar } from "@/hooks/usePresencaNoBar";
+import { prepararSons } from "@/lib/sons";
+import { useMediaPrefs } from "@/lib/mediaPrefs";
+import { statusDe } from "@/lib/status";
 import { useVoiceRoster } from "@/hooks/useVoiceRoster";
 import { ServerSettingsDialog } from "@/components/app/ServerSettingsDialog";
 import { AccountSettingsDialog } from "@/components/app/AccountSettingsDialog";
@@ -223,6 +226,12 @@ function AppPage() {
   const roles = membersQuery.data?.roles ?? {};
   const subnicks = membersQuery.data?.subnicks ?? {};
 
+  // Sons do bar: só com a preferência ligada, sem fone mudo e fora do
+  // "ocupado" (no MSN, ocupado também calava os avisos).
+  const { prefs } = useMediaPrefs();
+  const comSom = prefs.sons && !voice.deafened && statusDe(profile?.status) !== "ocupado";
+  useEffect(() => prepararSons(), []);
+
   // Quem está com o app aberto neste buteco agora: a lista de contatos online.
   const online = usePresencaNoBar({
     serverId: activeServerId,
@@ -230,6 +239,7 @@ function AppPage() {
     meuId: uid,
     meuStatus: profile?.status ?? "tomando_uma",
     nomeDe: (id) => names[id] ?? "Alguém",
+    comSom,
   });
 
   const naoLidas = useNaoLidas(
@@ -513,7 +523,7 @@ function AppPage() {
 
   return (
     <PerfilProvider>
-      <ConversasProvider meuId={uid!} nomeDe={(id) => names[id] ?? "Alguém"}>
+      <ConversasProvider meuId={uid!} nomeDe={(id) => names[id] ?? "Alguém"} comSom={comSom}>
         <div className="flex h-screen overflow-hidden">
           {activeServer ? (
             <>
