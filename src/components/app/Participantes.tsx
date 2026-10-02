@@ -182,7 +182,7 @@ export function Participantes({
         {fora.length > 0 && (
           <div className="mb-2">
             <h3 className="text-muted-foreground mb-1 px-2 text-[11px] font-semibold tracking-[0.14em] uppercase">
-              Fora do bar — {fora.length}
+              Grampeado — {fora.length}
             </h3>
             <ul className="flex flex-col">
               {fora

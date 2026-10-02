@@ -235,7 +235,7 @@ export function MembrosDialog({
             >
               <span
                 className={cn("relative shrink-0", !(p.userId in online) && "opacity-60")}
-                title={p.userId in online ? STATUS[online[p.userId]!].rotulo : "fora do bar agora"}
+                title={p.userId in online ? STATUS[online[p.userId]!].rotulo : "grampeado"}
               >
                 <Bottlecap name={p.name} src={avatars[p.userId]} className="size-8 text-xs" />
                 {p.userId in online && (
