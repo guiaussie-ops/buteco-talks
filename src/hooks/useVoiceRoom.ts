@@ -149,6 +149,16 @@ type PeerBox = {
    */
   telaAudioSender: RTCRtpSender | null;
   telaAudioAtual: MediaStreamTrack | null;
+  /**
+   * A faixa de vídeo que ESTE peer manda para mim, guardada do `ontrack`.
+   *
+   * Não dá para achá-la depois varrendo os receivers: cada conexão tem DOIS
+   * receivers de vídeo — o do transceiver que eu criei para mandar a minha
+   * tela (sempre o primeiro, e mudo para sempre) e o da linha que o outro lado
+   * abriu para mandar a dele. Pegar "o primeiro de vídeo" pegava o meu, e o
+   * "assistir" ficava carregando numa faixa que nunca recebe nada.
+   */
+  videoRemoto: MediaStreamTrack | null;
   /** Negociação que falhou por estado instável e precisa ser refeita. */
   renegociarPendente: boolean;
   /** Tentativas de volta seguidas, sem sucesso no meio. Zera ao conectar. */
@@ -433,10 +443,16 @@ export function useVoiceRoom(
   const repescarVideo = useCallback(
     (remoteId: string) => {
       if (!assistindoRef.current.includes(remoteId)) return;
-      const faixa = peersRef.current
-        .get(remoteId)
-        ?.pc.getReceivers()
-        .find((r) => r.track?.kind === "video")?.track;
+      const box = peersRef.current.get(remoteId);
+      if (!box) return;
+      // A faixa guardada no `ontrack`; se ainda não veio, a do transceiver de
+      // vídeo que NÃO é o meu de mandar (nunca "o primeiro de vídeo").
+      const faixa =
+        box.videoRemoto ??
+        box.pc
+          .getTransceivers()
+          .find((t) => t.receiver.track.kind === "video" && t.sender !== box.videoSender)?.receiver
+          .track;
       if (faixa) armarFaixa(remoteId, faixa);
     },
     [armarFaixa],
@@ -814,6 +830,7 @@ export function useVoiceRoom(
         videoAtual: null,
         telaAudioSender: null,
         telaAudioAtual: null,
+        videoRemoto: null,
         renegociarPendente: false,
         tentativas: 0,
         timerDeVolta: null,
@@ -883,8 +900,12 @@ export function useVoiceRoom(
         }
         // Vídeo que eu não pedi não entra no stream. Ele CHEGA de qualquer
         // jeito — o transceiver nasce com o peer —, mas ficar de fora até eu
-        // pedir é o que mantém a lista de faixas honesta.
-        if (e.track.kind === "video" && !assistindoRef.current.includes(remoteId)) return;
+        // pedir é o que mantém a lista de faixas honesta. A faixa fica guardada
+        // para quando eu pedir (ver `videoRemoto`).
+        if (e.track.kind === "video") {
+          box.videoRemoto = e.track;
+          if (!assistindoRef.current.includes(remoteId)) return;
+        }
         armarFaixa(remoteId, e.track);
       };
 
