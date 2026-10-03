@@ -670,7 +670,7 @@ export function ChannelSidebar({
         </div>
       </div>
 
-      {canManage && inviteCode && (
+      {inviteCode && (
         <div className="border-border border-b p-2">
           <Button
             size="sm"
@@ -953,7 +953,6 @@ export function ChannelSidebar({
           serverName={serverName}
           inviteCode={inviteCode}
           serverId={serverId}
-          canManage={canManage}
           onRegenerate={onRegenerateInvite}
         />
       )}

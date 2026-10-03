@@ -16,7 +16,7 @@ export const ROTULO: Record<Cargo, string> = {
 };
 
 export const DESCRICAO: Record<Exclude<Cargo, "owner">, string> = {
-  admin: "Mexe nas mesas, nos convites e nos cargos abaixo dele, e bane",
+  admin: "Mexe nas mesas e nos cargos abaixo dele, e bane",
   moderador: "Apaga mensagens dos outros e expulsa membros",
   member: "Senta, conversa e entra nas mesas de voz",
 };

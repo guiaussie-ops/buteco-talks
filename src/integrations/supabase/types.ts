@@ -586,6 +586,7 @@ export type Database = {
         Args: { _categorias: string[]; _mesas: Json; _server_id: string }
         Returns: undefined
       }
+      meu_convite: { Args: { _server_id: string }; Returns: string }
       nao_lidas: {
         Args: { _server_id: string }
         Returns: { channel_id: string; mencoes: number; nao_lidas: number }[]

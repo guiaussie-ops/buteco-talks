@@ -65,7 +65,7 @@ export const Route = createFileRoute("/app")({
   component: AppPage,
 });
 
-type ServerFull = ServerItem & { invite_code: string; my_role: string };
+type ServerFull = ServerItem & { my_role: string };
 
 function AppPage() {
   const navigate = useNavigate();
@@ -117,7 +117,7 @@ function AppPage() {
     queryFn: async (): Promise<ServerFull[]> => {
       const { data, error } = await supabase
         .from("server_members")
-        .select("role, server:servers(id, name, icon_emoji, owner_id, invite_code)")
+        .select("role, server:servers(id, name, icon_emoji, owner_id)")
         .eq("user_id", uid!);
       if (error) throw error;
       return (data ?? [])
@@ -372,6 +372,18 @@ function AppPage() {
   const canModerate = !!activeServer && PESO[meuCargo] >= PESO.moderador;
   const isOwner = meuCargo === "owner";
 
+  // Só quem cuida do app convida: para os outros o banco devolve null e o
+  // botão de convite nem aparece.
+  const conviteQuery = useQuery({
+    queryKey: ["convite", uid, activeServer?.id],
+    enabled: !!activeServer,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("meu_convite", { _server_id: activeServer!.id });
+      if (error) throw error;
+      return data;
+    },
+  });
+
   /**
    * Grava a arrumação nova das mesas. Aplica na tela antes, para o arrastar
    * não pular de volta enquanto o banco responde; se der erro, recarrega.
@@ -493,7 +505,7 @@ function AppPage() {
       toast.error("Não consegui gerar um convite novo.");
       return;
     }
-    await qc.invalidateQueries({ queryKey: ["servers", uid] });
+    await qc.invalidateQueries({ queryKey: ["convite", uid, activeServer.id] });
     toast.success("Convite novo na área: " + data);
   };
 
@@ -563,7 +575,7 @@ function AppPage() {
                   }}
                   onCreateServer={() => setCreateOpen(true)}
                   onJoinServer={() => setJoinOpen(true)}
-                  inviteCode={activeServer.invite_code}
+                  inviteCode={conviteQuery.data ?? null}
                   channels={channels}
                   categorias={categorias}
                   onOrganizar={organizar}

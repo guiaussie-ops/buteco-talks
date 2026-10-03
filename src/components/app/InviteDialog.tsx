@@ -29,7 +29,6 @@ type Props = {
   serverName: string;
   inviteCode: string;
   serverId: string;
-  canManage: boolean;
   onRegenerate: () => Promise<void>;
 };
 
@@ -45,7 +44,6 @@ export function InviteDialog({
   serverName,
   inviteCode,
   serverId,
-  canManage,
   onRegenerate,
 }: Props) {
   const [copied, setCopied] = useState<"link" | "code" | null>(null);
@@ -135,31 +133,29 @@ export function InviteDialog({
               </p>
             </div>
 
-            {canManage && <ConvitesComPrazo serverId={serverId} aberto={open} />}
+            <ConvitesComPrazo serverId={serverId} aberto={open} />
 
-            {canManage && (
-              <div className="border-border border-t pt-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">Trocar o convite</p>
-                    <p className="text-muted-foreground text-xs">
-                      Gera um código novo. O antigo para de funcionar na hora — quem já está no
-                      buteco continua dentro.
-                    </p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="shrink-0"
-                    onClick={() => setConfirmOpen(true)}
-                    disabled={spinning}
-                  >
-                    <RefreshCw className={cn("size-4", spinning && "animate-spin")} />
-                    Gerar novo
-                  </Button>
+            <div className="border-border border-t pt-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">Trocar o convite</p>
+                  <p className="text-muted-foreground text-xs">
+                    Gera um código novo. O antigo para de funcionar na hora — quem já está no buteco
+                    continua dentro.
+                  </p>
                 </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => setConfirmOpen(true)}
+                  disabled={spinning}
+                >
+                  <RefreshCw className={cn("size-4", spinning && "animate-spin")} />
+                  Gerar novo
+                </Button>
               </div>
-            )}
+            </div>
           </div>
         </DialogContent>
       </Dialog>
