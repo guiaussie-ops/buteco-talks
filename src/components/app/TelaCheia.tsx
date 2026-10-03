@@ -4,6 +4,7 @@ import { chaveDaTela, useVoice } from "@/lib/voice";
 import { Button } from "@/components/ui/button";
 import { ControleDeVolume, useAudioDoParticipante } from "@/components/app/ControleDeVolume";
 import { cn } from "@/lib/utils";
+import { TransmissaoNaoAbriu, useTransmissaoTravada } from "@/components/app/NaTelaAgora";
 
 /**
  * Um <video> preso a um stream. SEMPRE mudo, e isto não é detalhe de estilo.
@@ -89,6 +90,12 @@ export function TelaCheia({ names }: { names: Record<string, string> }) {
   const voice = useVoice();
   const id = voice.foco;
   if (!id) return null;
+  return <TelaCheiaDe id={id} names={names} />;
+}
+
+function TelaCheiaDe({ id, names }: { id: string; names: Record<string, string> }) {
+  const voice = useVoice();
+  const { travada, tentarDeNovo } = useTransmissaoTravada(id);
   const peer = voice.remotePeers.find((p) => p.userId === id && p.hasVideo);
   const nome = names[id] ?? "Participante";
   const modo = voice.transmissoes[id];
@@ -117,6 +124,8 @@ export function TelaCheia({ names }: { names: Record<string, string> }) {
         <div className="border-primary/50 relative min-h-0 flex-1 overflow-hidden rounded-xl border-2 bg-black">
           {peer ? (
             <VideoDoStream stream={peer.stream} />
+          ) : travada ? (
+            <TransmissaoNaoAbriu nome={nome} onTentarDeNovo={tentarDeNovo} />
           ) : (
             <div className="text-muted-foreground flex h-full flex-col items-center justify-center gap-2 text-sm">
               <Loader2 className="text-primary size-6 animate-spin" />

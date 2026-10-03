@@ -65,6 +65,11 @@ type VoiceContextValue = {
   sairDaTelaCheia: () => void;
   /** Ninguém com som: todas as miniaturas mudas. */
   silenciarTelas: () => void;
+  /**
+   * A transmissão não abriu: desiste e pede de novo. O pedido refeito viaja na
+   * presença outra vez, e é isso que conserta um pedido que se perdeu.
+   */
+  tentarAssistirDeNovo: (userId: string) => void;
   speaking: Record<string, boolean>;
   participantCount: number;
   /** Microfone fechado / fone mudo de cada um dos OUTROS, vindo da presenca. */
@@ -389,6 +394,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     setFocoEscolhido(null);
     setTelaCheiaPedida(false);
   }, []);
+  const { pararDeAssistir } = room;
+  const tentarAssistirDeNovo = useCallback(
+    (id: string) => {
+      // O foco e a tela cheia ficam como estavam: voltam sozinhos assim que o
+      // pedido refeito põe a pessoa de novo em `assistindo`.
+      pararDeAssistir(id);
+      window.setTimeout(() => assistir(id), 400);
+    },
+    [pararDeAssistir, assistir],
+  );
 
   const speaking = useSpeaking([
     ...(userId && room.micOn ? [{ id: userId, stream: room.micStream }] : []),
@@ -521,6 +536,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       abrirEmTelaCheia,
       sairDaTelaCheia,
       silenciarTelas,
+      tentarAssistirDeNovo,
       speaking,
       participantCount: room.participantCount,
       estadosDeAudio: room.estadosDeAudio,
@@ -543,6 +559,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       abrirEmTelaCheia,
       sairDaTelaCheia,
       silenciarTelas,
+      tentarAssistirDeNovo,
       speaking,
       prefs.peerAudio,
       setPeerVolume,

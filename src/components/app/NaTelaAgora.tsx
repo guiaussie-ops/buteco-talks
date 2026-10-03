@@ -1,9 +1,12 @@
+import { useEffect, useState } from "react";
 import {
+  AlertTriangle,
   Eye,
   EyeOff,
   Loader2,
   Maximize2,
   MonitorUp,
+  RotateCcw,
   MonitorX,
   Video,
   Volume2,
@@ -26,6 +29,71 @@ import { SomDaTransmissao, VideoDoStream } from "@/components/app/TelaCheia";
 export function useTemTelaAgora() {
   const voice = useVoice();
   return !!voice.active && (Object.keys(voice.transmissoes).length > 0 || !!voice.localVideoStream);
+}
+
+/** Quanto esperar a imagem chegar antes de dizer que não abriu. */
+const ESPERA_DA_TRANSMISSAO_MS = 15_000;
+
+/**
+ * Se a transmissão de alguém, pedida, não abriu: 15 s sem imagem viram estado
+ * de falha, com "Tentar de novo" — em vez de um spinner girando para sempre.
+ */
+export function useTransmissaoTravada(userId: string) {
+  const voice = useVoice();
+  const esperando =
+    voice.assistindo.includes(userId) &&
+    !voice.remotePeers.some((p) => p.userId === userId && p.hasVideo);
+  const [travada, setTravada] = useState(false);
+  const [tentativa, setTentativa] = useState(0);
+  useEffect(() => {
+    setTravada(false);
+    if (!esperando) return;
+    const t = window.setTimeout(() => setTravada(true), ESPERA_DA_TRANSMISSAO_MS);
+    return () => window.clearTimeout(t);
+  }, [esperando, tentativa]);
+  return {
+    travada: travada && esperando,
+    tentarDeNovo: () => {
+      setTentativa((n) => n + 1);
+      voice.tentarAssistirDeNovo(userId);
+    },
+  };
+}
+
+/** Recado de transmissão que não abriu, com o botão de tentar de novo. */
+export function TransmissaoNaoAbriu({
+  nome,
+  onTentarDeNovo,
+  compacto,
+}: {
+  nome: string;
+  onTentarDeNovo: () => void;
+  compacto?: boolean;
+}) {
+  return (
+    <div
+      role="alert"
+      className={cn(
+        "flex flex-col items-center justify-center gap-2 text-center",
+        compacto ? "p-2" : "h-full p-6",
+      )}
+    >
+      <AlertTriangle className={cn("text-warning", compacto ? "size-4" : "size-7")} />
+      <p className={cn("text-muted-foreground", compacto ? "text-[11px]" : "text-sm")}>
+        Não consegui abrir a transmissão de {nome}.
+      </p>
+      <button
+        type="button"
+        onClick={onTentarDeNovo}
+        className={cn(
+          "bg-primary text-primary-foreground hover:bg-primary/90 inline-flex items-center gap-1.5 rounded-md font-semibold",
+          compacto ? "px-2 py-1 text-[11px]" : "px-3 py-1.5 text-sm",
+        )}
+      >
+        <RotateCcw className={compacto ? "size-3" : "size-4"} /> Tentar de novo
+      </button>
+    </div>
+  );
 }
 
 /** Selo do canto da miniatura: com som (a escolhida) ou sem. */
@@ -68,6 +136,7 @@ function Miniatura({
   const comSom = voice.foco === userId;
   const naTelaCheia = comSom && voice.telaCheia;
   const rotulo = `${nome} · ${modo === "camera" ? "câmera" : "tela"}`;
+  const { travada, tentarDeNovo } = useTransmissaoTravada(userId);
 
   let quadro;
   if (naTelaCheia) {
@@ -78,6 +147,12 @@ function Miniatura({
     );
   } else if (peer?.hasVideo) {
     quadro = <VideoDoStream stream={peer.stream} />;
+  } else if (assistindo && travada) {
+    quadro = (
+      <div className="text-muted-foreground flex h-full items-center justify-center gap-1.5 px-2 text-center text-xs">
+        <AlertTriangle className="text-warning size-4 shrink-0" /> não abriu
+      </div>
+    );
   } else if (assistindo) {
     quadro = (
       <div className="text-muted-foreground flex h-full items-center justify-center gap-2 text-xs">
@@ -163,7 +238,12 @@ function Miniatura({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
-      {comSom && !naTelaCheia && (
+      {travada && !naTelaCheia && (
+        <div className="bg-surface border-border border-t">
+          <TransmissaoNaoAbriu nome={nome} onTentarDeNovo={tentarDeNovo} compacto />
+        </div>
+      )}
+      {comSom && !naTelaCheia && !travada && (
         <div className="bg-surface border-border border-t px-1 py-0.5">
           <SomDaTransmissao userId={userId} nome={nome} temAudio={!!peer?.audioDaTela} />
         </div>

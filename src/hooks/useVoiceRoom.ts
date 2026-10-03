@@ -70,6 +70,12 @@ type SignalPayload = {
   to: string;
   description?: RTCSessionDescriptionInit;
   candidate?: RTCIceCandidateInit;
+  /**
+   * O lado educado recriou a conexão e pede uma oferta nova. Ele nunca oferece
+   * (ver `createPeer`), então sem isto ficaria esperando para sempre quando só
+   * ele percebeu a queda.
+   */
+  pedirOferta?: boolean;
 };
 
 const ICE_SERVERS: RTCConfiguration = {
@@ -150,15 +156,26 @@ type PeerBox = {
   telaAudioSender: RTCRtpSender | null;
   telaAudioAtual: MediaStreamTrack | null;
   /**
-   * A faixa de vídeo que ESTE peer manda para mim, guardada do `ontrack`.
-   *
-   * Não dá para achá-la depois varrendo os receivers: cada conexão tem DOIS
-   * receivers de vídeo — o do transceiver que eu criei para mandar a minha
-   * tela (sempre o primeiro, e mudo para sempre) e o da linha que o outro lado
-   * abriu para mandar a dele. Pegar "o primeiro de vídeo" pegava o meu, e o
-   * "assistir" ficava carregando numa faixa que nunca recebe nada.
+   * A faixa de vídeo que ESTE peer manda para mim, guardada do `ontrack` —
+   * que só entrega faixa remota. É ela que o "assistir" prende ao stream.
    */
   videoRemoto: MediaStreamTrack | null;
+  /**
+   * Mensagens de sinal deste peer, uma de cada vez. Tratadas soltas, uma
+   * resposta e uma oferta que chegavam juntas se atropelavam: a oferta via o
+   * estado no meio da troca, era tomada por colisão e ignorada.
+   */
+  fila: Promise<void>;
+  /** Aplicando uma resposta agora: oferta que chega neste meio não é colisão. */
+  aplicandoResposta: boolean;
+  /**
+   * Candidatos que chegaram antes da descrição do outro lado. Aplicá-los
+   * nessa hora dá erro e eles se perdem — e sem candidato nenhum a conexão
+   * nem sai de `new`. Ficam guardados até a descrição chegar.
+   */
+  candidatosAdiantados: RTCIceCandidateInit[];
+  /** Quando este pc nasceu: um pedido de oferta logo depois é eco, não queda. */
+  criadoEm: number;
   /** Negociação que falhou por estado instável e precisa ser refeita. */
   renegociarPendente: boolean;
   /** Tentativas de volta seguidas, sem sucesso no meio. Zera ao conectar. */
@@ -379,13 +396,9 @@ export function useVoiceRoom(
       const alvo = quer ? track : null;
       if (box.videoAtual !== alvo) {
         box.videoAtual = alvo;
-        if (box.videoSender) {
-          void box.videoSender.replaceTrack(alvo).catch(() => undefined);
-        } else if (alvo && videoStreamRef.current) {
-          // Só cai aqui num navegador sem addTransceiver, onde o sender não pôde
-          // nascer junto com o peer. Aqui renegocia, e tudo bem: é o caminho raro.
-          box.videoSender = box.pc.addTrack(alvo, videoStreamRef.current);
-        }
+        // Sem sender ainda (o lado educado antes da primeira oferta): fica para
+        // quando ele adotar as linhas, que chama isto de novo.
+        void box.videoSender?.replaceTrack(alvo).catch(() => undefined);
       }
       // Fora do `if` de propósito: o teto depende do TAMANHO da plateia, então
       // alguém entrando ou saindo da transmissão muda a conta de todo mundo,
@@ -445,14 +458,12 @@ export function useVoiceRoom(
       if (!assistindoRef.current.includes(remoteId)) return;
       const box = peersRef.current.get(remoteId);
       if (!box) return;
-      // A faixa guardada no `ontrack`; se ainda não veio, a do transceiver de
-      // vídeo que NÃO é o meu de mandar (nunca "o primeiro de vídeo").
+      // A faixa guardada no `ontrack`; se ainda não veio, a da linha de vídeo
+      // já negociada. Há uma só por conexão (de mão dupla, ver `createPeer`).
       const faixa =
         box.videoRemoto ??
-        box.pc
-          .getTransceivers()
-          .find((t) => t.receiver.track.kind === "video" && t.sender !== box.videoSender)?.receiver
-          .track;
+        box.pc.getTransceivers().find((t) => t.mid !== null && t.receiver.track.kind === "video")
+          ?.receiver.track;
       if (faixa) armarFaixa(remoteId, faixa);
     },
     [armarFaixa],
@@ -515,6 +526,14 @@ export function useVoiceRoom(
     [publish],
   );
 
+  /** Repescagens em andamento, uma por pessoa assistida. */
+  const repescasRef = useRef(new Map<string, number>());
+  const pararRepesca = useCallback((remoteId: string) => {
+    const t = repescasRef.current.get(remoteId);
+    if (t !== undefined) window.clearInterval(t);
+    repescasRef.current.delete(remoteId);
+  }, []);
+
   /** Peço para receber o vídeo de alguém. O pedido viaja na presença. */
   const assistir = useCallback(
     (remoteId: string) => {
@@ -524,9 +543,24 @@ export function useVoiceRoom(
         assistindoRef.current = [...assistindoRef.current, remoteId];
       }
       repescarVideo(remoteId);
+      // Rede de segurança: se a faixa ainda não estava à mão (conexão no meio
+      // de uma negociação, por exemplo), tenta de novo a cada meio segundo por
+      // até 10 s, até ela entrar no stream.
+      pararRepesca(remoteId);
+      let tentativas = 0;
+      const t = window.setInterval(() => {
+        tentativas += 1;
+        const armada = !!remoteStreamsRef.current.get(remoteId)?.getVideoTracks().length;
+        if (!assistindoRef.current.includes(remoteId) || armada || tentativas > 20) {
+          pararRepesca(remoteId);
+          return;
+        }
+        repescarVideo(remoteId);
+      }, 500);
+      repescasRef.current.set(remoteId, t);
       setAssistindo((prev) => (prev.includes(remoteId) ? prev : [...prev, remoteId]));
     },
-    [repescarVideo],
+    [repescarVideo, pararRepesca],
   );
 
   /**
@@ -538,12 +572,13 @@ export function useVoiceRoom(
   const pararDeAssistir = useCallback(
     (remoteId: string) => {
       assistindoRef.current = assistindoRef.current.filter((id) => id !== remoteId);
+      pararRepesca(remoteId);
       soltarVideoRecebido(remoteId);
       setAssistindo((prev) =>
         prev.includes(remoteId) ? prev.filter((id) => id !== remoteId) : prev,
       );
     },
-    [soltarVideoRecebido],
+    [soltarVideoRecebido, pararRepesca],
   );
 
   /** Reaplica o botão de mudo na faixa que acabou de entrar no ar. */
@@ -748,7 +783,12 @@ export function useVoiceRoom(
    * o ramo preservando o volume que eu tinha escolhido para ela.
    */
   const recriarPeer = useCallback(
-    (remoteId: string) => {
+    /**
+     * `pedirOferta`: o lado educado avisa o outro que recriou e precisa de uma
+     * oferta nova. Desligado quando a recriação foi justamente por causa de uma
+     * oferta que chegou — pedir outra aí só faria o outro lado recriar de novo.
+     */
+    (remoteId: string, pedirOferta = true) => {
       const antigo = peersRef.current.get(remoteId);
       if (antigo) {
         cancelarVolta(antigo);
@@ -769,12 +809,14 @@ export function useVoiceRoom(
 
       const novo = createPeerRef.current?.(remoteId, !souImpolido(remoteId));
       if (novo) novo.tentativas = (antigo?.tentativas ?? 0) + 1;
+      if (novo?.polite && pedirOferta && userId)
+        send({ from: userId, to: remoteId, pedirOferta: true });
       // Quem já queria o meu vídeo continua querendo: a presença não mudou, só
       // a conexão. Sem isto, a transmissão voltaria preta até o próximo sync.
       aplicarVideoNosPeers();
       return novo;
     },
-    [aplicarVideoNosPeers, cancelarVolta, publish, souImpolido],
+    [aplicarVideoNosPeers, cancelarVolta, publish, souImpolido, send, userId],
   );
 
   /**
@@ -831,32 +873,44 @@ export function useVoiceRoom(
         telaAudioSender: null,
         telaAudioAtual: null,
         videoRemoto: null,
+        fila: Promise.resolve(),
+        aplicandoResposta: false,
+        candidatosAdiantados: [],
+        criadoEm: Date.now(),
         renegociarPendente: false,
         tentativas: 0,
         timerDeVolta: null,
       };
       peersRef.current.set(remoteId, box);
 
+      /**
+       * As linhas da conexão, e quem as cria. Só QUEM INICIA (o impolido) cria,
+       * nesta ordem: microfone, vídeo e áudio da tela — as duas últimas de mão
+       * dupla. O educado nunca cria linha nem faz oferta: adota as que chegam
+       * na oferta (ver `adotarLinhas`) e só responde.
+       *
+       * Antes os dois lados criavam as próprias linhas de vídeo e ofereciam ao
+       * mesmo tempo. A colisão era garantida, e em parte das vezes a linha do
+       * educado nunca chegava a ser negociada: quem assistia a tela dele ficava
+       * no "abrindo" para sempre. Sem oferta do educado, não há colisão.
+       *
+       * As linhas nascem VAZIAS mesmo que eu já esteja transmitindo: quem chega
+       * não recebe vídeo até pedir (entra por `aplicarVideoNosPeers`).
+       */
       const aTrack = micStreamRef.current?.getAudioTracks()[0];
       if (aTrack && micStreamRef.current) {
+        // addTrack com o micStream: o microfone chega do outro lado com
+        // `e.streams` preenchido, e é isso que o separa do áudio da tela.
         box.audioSender = pc.addTrack(aTrack, micStreamRef.current);
+      } else if (!polite) {
+        // Quem inicia sem microfone guarda o lugar da linha de voz. Sem ela, o
+        // microfone do outro lado se encaixaria na linha do áudio da tela.
+        pc.addTransceiver("audio", { direction: "recvonly" });
       }
-      // O transceiver de vídeo nasce com o peer, mesmo sem ninguém transmitindo:
-      // é o que permite começar e parar depois sem renegociar nada. Nasce VAZIO
-      // mesmo que eu já esteja transmitindo — quem chega não recebe vídeo até
-      // pedir. Quem pedir entra por `aplicarVideoNosPeers`, na sincronização de
-      // presença que vem logo em seguida.
-      try {
-        const transceiver = pc.addTransceiver("video", { direction: "sendonly" });
-        box.videoSender = transceiver.sender;
-        // O áudio da tela ganha uma linha própria, criada SEM stream associado.
-        // É isso que o outro lado usa para separá-lo da voz no `ontrack`: o
-        // microfone entra por addTrack com o micStream e chega com
-        // `e.streams` preenchido; este chega com `e.streams` vazio.
-        box.telaAudioSender = pc.addTransceiver("audio", { direction: "sendonly" }).sender;
-      } catch {
-        // Navegador sem addTransceiver: o sender nasce lá no aplicarVideoNosPeers,
-        // por addTrack, quando alguém pedir de fato. Áudio de tela fica de fora.
+      if (!polite) {
+        box.videoSender = pc.addTransceiver("video", { direction: "sendrecv" }).sender;
+        // Criada SEM stream associado: chega do outro lado com `e.streams` vazio.
+        box.telaAudioSender = pc.addTransceiver("audio", { direction: "sendrecv" }).sender;
       }
 
       pc.onicecandidate = (e) => {
@@ -865,7 +919,10 @@ export function useVoiceRoom(
       };
 
       const negociar = async () => {
-        if (!userId) return;
+        // O educado não oferece nunca (ver as linhas, acima). O
+        // negotiationneeded que o addTrack do microfone dispara nele morre aqui;
+        // a resposta à oferta de quem inicia já leva o microfone junto.
+        if (!userId || polite) return;
         try {
           box.makingOffer = true;
           await pc.setLocalDescription();
@@ -1113,25 +1170,77 @@ export function useVoiceRoom(
         // conexão em `failed` só produz erro de estado — e é o caso comum,
         // porque nem sempre os dois lados percebem a queda ao mesmo tempo.
         if (box && (box.pc.connectionState === "failed" || box.pc.connectionState === "closed")) {
-          box = recriarPeer(msg.from);
+          box = recriarPeer(msg.from, false);
         }
         if (!box) box = createPeer(msg.from, userId > msg.from);
+        const alvo = box;
+        // Uma mensagem de cada vez, por peer (ver `fila`).
+        alvo.fila = alvo.fila.then(() => tratarSinal(alvo, msg)).catch(() => undefined);
+      });
+
+      /**
+       * O lado educado adota as linhas que vieram na oferta: a de vídeo e a do
+       * áudio da tela passam a ser de mão dupla, e os senders delas viram os
+       * meus. Precisa acontecer ANTES de montar a resposta, para ela já sair
+       * dizendo que eu também mando — senão seria outra negociação.
+       */
+      const adotarLinhas = (box: PeerBox) => {
+        const linhas = box.pc
+          .getTransceivers()
+          .filter((t) => t.mid !== null && t.currentDirection !== "stopped");
+        const video = linhas.find((t) => t.receiver.track.kind === "video");
+        if (video && video.sender !== box.videoSender) {
+          video.direction = "sendrecv";
+          box.videoSender = video.sender;
+          box.videoAtual = null;
+        }
+        // A primeira linha de áudio é a voz de quem iniciou; a outra é a tela.
+        const audios = linhas
+          .filter((t) => t.receiver.track.kind === "audio")
+          .sort((a, b) => Number(a.mid) - Number(b.mid));
+        const tela = audios[1];
+        if (tela && tela.sender !== box.telaAudioSender && tela.sender !== box.audioSender) {
+          tela.direction = "sendrecv";
+          box.telaAudioSender = tela.sender;
+          box.telaAudioAtual = null;
+        }
+      };
+
+      const tratarSinal = async (box: PeerBox, msg: SignalPayload) => {
         const { pc } = box;
+        if (msg.pedirOferta) {
+          // O educado recriou e precisa de oferta. Um pc que acabou de nascer já
+          // está oferecendo: recriar de novo só atropelaria a oferta em voo.
+          if (!box.polite && Date.now() - box.criadoEm > 2_000) recriarPeer(msg.from);
+          return;
+        }
         try {
           if (msg.description) {
-            const offerCollision =
-              msg.description.type === "offer" &&
-              (box.makingOffer || pc.signalingState !== "stable");
-            box.ignoreOffer = !box.polite && offerCollision;
+            const pronto =
+              !box.makingOffer && (pc.signalingState === "stable" || box.aplicandoResposta);
+            const colisao = msg.description.type === "offer" && !pronto;
+            box.ignoreOffer = !box.polite && colisao;
             if (box.ignoreOffer) return;
+            box.aplicandoResposta = msg.description.type === "answer";
             await pc.setRemoteDescription(msg.description);
+            box.aplicandoResposta = false;
+            // Agora sim os candidatos que chegaram cedo têm onde entrar.
+            const adiantados = box.candidatosAdiantados.splice(0);
+            for (const c of adiantados) await pc.addIceCandidate(c).catch(() => undefined);
             if (msg.description.type === "offer") {
+              if (box.polite) adotarLinhas(box);
               await pc.setLocalDescription();
               if (pc.localDescription) {
                 send({ from: userId, to: msg.from, description: pc.localDescription.toJSON() });
               }
+              // Linhas adotadas: quem já queria o meu vídeo passa a recebê-lo.
+              if (box.polite) aplicarVideoNosPeers();
             }
           } else if (msg.candidate) {
+            if (!pc.remoteDescription) {
+              box.candidatosAdiantados.push(msg.candidate);
+              return;
+            }
             try {
               await pc.addIceCandidate(msg.candidate);
             } catch {
@@ -1139,9 +1248,10 @@ export function useVoiceRoom(
             }
           }
         } catch {
-          /* ignore transient signaling errors */
+          box.aplicandoResposta = false;
+          /* erros transitórios de sinalização */
         }
-      });
+      };
 
       chan.subscribe((status) => {
         if (status === "SUBSCRIBED") {
@@ -1171,6 +1281,8 @@ export function useVoiceRoom(
       peersRef.current.clear();
       remoteStreamsRef.current.clear();
       telaStreamsRef.current.clear();
+      repescasRef.current.forEach((t) => window.clearInterval(t));
+      repescasRef.current.clear();
       setRemotePeers([]);
       setParticipants([]);
       setTransmissoes({});
