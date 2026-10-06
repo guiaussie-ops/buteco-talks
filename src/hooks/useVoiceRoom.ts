@@ -54,6 +54,12 @@ type PresencaDeVoz = {
   micOff: boolean;
   /** Estou de fone mudo. Também vai para a presença: quem fala comigo merece saber. */
   deafened: boolean;
+  /**
+   * Muda a cada entrada na mesa, e só nela. É o que separa "a mesma pessoa,
+   * outra vez" de "a mesma pessoa, de volta": a chave da presença é o user_id
+   * nos dois casos. Opcional porque versões anteriores do app não publicam.
+   */
+  sessao?: string;
 };
 
 /**
@@ -76,6 +82,14 @@ type SignalPayload = {
    * ele percebeu a queda.
    */
   pedirOferta?: boolean;
+  /** Sessão de quem mandou (ver `PresencaDeVoz.sessao`). */
+  deSessao?: string;
+  /**
+   * Sessão a quem a mensagem se destina, quando quem manda já a conhece. Quem
+   * fechou a aba e voltou descarta o que ainda vinha endereçado à entrada
+   * anterior — aplicar aquilo na conexão nova era o que a envenenava.
+   */
+  paraSessao?: string;
 };
 
 const ICE_SERVERS: RTCConfiguration = {
@@ -130,6 +144,22 @@ const PISO_DE_BITRATE_BPS = 300_000;
 const BACKOFF_BASE_MS = 2_000;
 const BACKOFF_TETO_MS = 30_000;
 
+/**
+ * Quanto tempo alguém pode sumir da presença sem perder a conexão de áudio.
+ *
+ * A presença pisca: a aba do outro foi para segundo plano, o navegador segurou
+ * o heartbeat do Realtime, o socket caiu e voltou. A pessoa nunca saiu da mesa
+ * — a conexão de áudio entre nós nem percebeu. Derrubar o peer nessa piscada
+ * era o "paro de ouvir fulano do nada e volto a ouvir": o meu lado fechava a
+ * conexão, o dele continuava com a velha, e a nova só se acertava quando a
+ * velha morria de vez lá, dezenas de segundos depois.
+ *
+ * Quem sai de verdade some da TELA na hora (a lista vem da presença); só a
+ * conexão espera. E quem sai e volta dentro deste prazo é reconhecido pela
+ * sessão nova, não por este relógio.
+ */
+const TOLERANCIA_DE_AUSENCIA_MS = 12_000;
+
 type PeerBox = {
   pc: RTCPeerConnection;
   polite: boolean;
@@ -182,6 +212,12 @@ type PeerBox = {
   tentativas: number;
   /** Tentativa agendada. Um por peer — o teardown depende disso para limpar. */
   timerDeVolta: number | null;
+  /**
+   * A entrada do outro lado com que esta conexão foi feita. Se chega sinal ou
+   * presença de uma sessão diferente, a pessoa saiu e voltou: esta conexão é
+   * com alguém que não existe mais, e precisa ser refeita na hora.
+   */
+  sessaoRemota: string | null;
 };
 
 /**
@@ -263,6 +299,16 @@ export function useVoiceRoom(
   const deafenedRef = useRef(false);
   /** Instante da entrada. Fixo, para republicar a presença não virar um diff. */
   const entradaRef = useRef(0);
+  /** Esta entrada na mesa. Ver `PresencaDeVoz.sessao`. */
+  const sessaoRef = useRef("");
+  /** Quem sumiu da presença e está no prazo de tolerância. Ver a constante. */
+  const ausentesRef = useRef(new Map<string, number>());
+  /**
+   * Sessões dos outros que já foram substituídas por uma entrada nova. Sinal
+   * atrasado de uma delas é ignorado — senão faria a conexão ser refeita de
+   * novo, agora para trás.
+   */
+  const sessoesEncerradasRef = useRef(new Set<string>());
 
   // As prefs entram por ref: mudar o volume não pode reconectar a mesa inteira.
   const prefsRef = useRef(prefs);
@@ -302,7 +348,12 @@ export function useVoiceRoom(
   }, []);
 
   const send = useCallback((payload: SignalPayload) => {
-    void chanRef.current?.send({ type: "broadcast", event: "signal", payload });
+    const paraSessao = peersRef.current.get(payload.to)?.sessaoRemota ?? undefined;
+    void chanRef.current?.send({
+      type: "broadcast",
+      event: "signal",
+      payload: { ...payload, deSessao: sessaoRef.current, paraSessao },
+    });
   }, []);
 
   /**
@@ -319,6 +370,7 @@ export function useVoiceRoom(
       assistindo: assistindoRef.current,
       micOff: !micOnRef.current,
       deafened: deafenedRef.current,
+      sessao: sessaoRef.current,
     };
     void chan.track(payload).catch(() => undefined);
   }, [userId]);
@@ -788,7 +840,7 @@ export function useVoiceRoom(
      * oferta nova. Desligado quando a recriação foi justamente por causa de uma
      * oferta que chegou — pedir outra aí só faria o outro lado recriar de novo.
      */
-    (remoteId: string, pedirOferta = true) => {
+    (remoteId: string, pedirOferta = true, sessaoNova?: string) => {
       const antigo = peersRef.current.get(remoteId);
       if (antigo) {
         cancelarVolta(antigo);
@@ -808,7 +860,14 @@ export function useVoiceRoom(
       publish();
 
       const novo = createPeerRef.current?.(remoteId, !souImpolido(remoteId));
-      if (novo) novo.tentativas = (antigo?.tentativas ?? 0) + 1;
+      if (novo) {
+        // Outra sessão do outro lado é outra pessoa para a conexão: começa do
+        // zero, sem herdar o backoff de quem saiu.
+        novo.tentativas = sessaoNova ? 0 : (antigo?.tentativas ?? 0) + 1;
+        novo.sessaoRemota = sessaoNova ?? antigo?.sessaoRemota ?? null;
+      }
+      if (sessaoNova && antigo?.sessaoRemota && antigo.sessaoRemota !== sessaoNova)
+        sessoesEncerradasRef.current.add(antigo.sessaoRemota);
       if (novo?.polite && pedirOferta && userId)
         send({ from: userId, to: remoteId, pedirOferta: true });
       // Quem já queria o meu vídeo continua querendo: a presença não mudou, só
@@ -880,6 +939,7 @@ export function useVoiceRoom(
         renegociarPendente: false,
         tentativas: 0,
         timerDeVolta: null,
+        sessaoRemota: null,
       };
       peersRef.current.set(remoteId, box);
 
@@ -1072,6 +1132,9 @@ export function useVoiceRoom(
     if (!channelId || !userId) return;
     let cancelled = false;
 
+    // Antes de tudo: a primeira presença e o primeiro sinal já saem com ela.
+    sessaoRef.current = crypto.randomUUID();
+
     const start = async () => {
       try {
         const cru = await navigator.mediaDevices.getUserMedia({
@@ -1111,12 +1174,18 @@ export function useVoiceRoom(
         const transmitindo: Record<string, Transmissao> = {};
         const estados: Record<string, EstadoDeAudio> = {};
         const querem = new Set<string>();
+        const sessoes: Record<string, string | undefined> = {};
         for (const [id, entradas] of Object.entries(state)) {
           if (id === userId) continue;
-          // Uma pessoa pode ter mais de uma conexão sob a mesma chave; a última
-          // é a que vale.
-          const p = entradas[entradas.length - 1];
+          // Uma pessoa pode ter mais de uma conexão sob a mesma chave — quem
+          // fechou a aba e voltou fica com a entrada velha ali até o servidor
+          // perceber. Vale a entrada mais recente.
+          const p = entradas.reduce<PresencaDeVoz | undefined>(
+            (maisNova, e) => (!maisNova || (e.at ?? 0) >= (maisNova.at ?? 0) ? e : maisNova),
+            undefined,
+          );
           if (!p) continue;
+          sessoes[id] = p.sessao;
           if (p.video === "camera" || p.video === "screen") transmitindo[id] = p.video;
           if (p.assistindo?.includes(userId)) querem.add(id);
           // `=== true` e não `!!`: quem está numa versão anterior do app não
@@ -1142,17 +1211,51 @@ export function useVoiceRoom(
 
         const ids = todos.filter((id) => id !== userId);
         ids.forEach((id) => {
-          if (!peersRef.current.has(id)) {
+          // Voltou dentro da tolerância: a conexão que ficou de pé segue valendo.
+          const ausente = ausentesRef.current.get(id);
+          if (ausente !== undefined) {
+            window.clearTimeout(ausente);
+            ausentesRef.current.delete(id);
+          }
+          const sessao = sessoes[id];
+          const box = peersRef.current.get(id);
+          if (!box) {
             // deterministic roles: lower id is the impolite initiator
             const initiator = userId < id;
             // O transceiver criado dentro de createPeer já dispara
             // onnegotiationneeded em quem inicia; um createOffer solto aqui não
             // mandava nada e só confundia.
-            createPeer(id, !initiator);
+            createPeer(id, !initiator).sessaoRemota = sessao ?? null;
+          } else if (
+            sessao &&
+            box.sessaoRemota &&
+            box.sessaoRemota !== sessao &&
+            !sessoesEncerradasRef.current.has(sessao)
+          ) {
+            // Saiu e voltou (fechou a aba, trocou de mesa e voltou). A conexão
+            // que eu tenho é com a entrada anterior, e o outro lado já nem a
+            // tem: refaz agora, em vez de esperar ela morrer de velha.
+            recriarPeer(id, true, sessao);
+          } else if (sessao && !box.sessaoRemota) {
+            box.sessaoRemota = sessao;
           }
         });
         Array.from(peersRef.current.keys()).forEach((id) => {
-          if (!ids.includes(id)) dropPeer(id);
+          if (ids.includes(id) || ausentesRef.current.has(id)) return;
+          const estado = peersRef.current.get(id)?.pc.connectionState;
+          // Conexão que já não funcionava não tem o que preservar.
+          if (estado !== "connected" && estado !== "connecting") {
+            dropPeer(id);
+            return;
+          }
+          ausentesRef.current.set(
+            id,
+            window.setTimeout(() => {
+              ausentesRef.current.delete(id);
+              const agora = chanRef.current?.presenceState() ?? {};
+              if (!(id in agora)) dropPeer(id);
+            }, TOLERANCIA_DE_AUSENCIA_MS),
+          );
         });
         // Por último, com os peers já criados: quem passou a querer o meu vídeo
         // recebe a faixa, quem desistiu recebe `null`. É idempotente, então
@@ -1164,7 +1267,17 @@ export function useVoiceRoom(
       chan.on("broadcast", { event: "signal" }, async ({ payload }) => {
         const msg = payload as SignalPayload;
         if (msg.to !== userId) return;
+        // Endereçado a uma entrada minha que já acabou (ver `paraSessao`).
+        if (msg.paraSessao && msg.paraSessao !== sessaoRef.current) return;
+        // Vindo de uma entrada do outro que já foi substituída.
+        if (msg.deSessao && sessoesEncerradasRef.current.has(msg.deSessao)) return;
         let box = peersRef.current.get(msg.from);
+        if (box && msg.deSessao && box.sessaoRemota && box.sessaoRemota !== msg.deSessao) {
+          // O outro lado é uma entrada nova, e o sinal chegou antes da presença
+          // dela. Refaz já; uma oferta que chega aqui é justamente o começo da
+          // conexão nova, então não se pede outra.
+          box = recriarPeer(msg.from, msg.description?.type !== "offer", msg.deSessao);
+        }
         // Peer morto do meu lado, oferta chegando do outro: quem detectou a
         // queda primeiro já se reconstruiu e está oferecendo. Aplicar isso numa
         // conexão em `failed` só produz erro de estado — e é o caso comum,
@@ -1173,6 +1286,7 @@ export function useVoiceRoom(
           box = recriarPeer(msg.from, false);
         }
         if (!box) box = createPeer(msg.from, userId > msg.from);
+        if (!box.sessaoRemota && msg.deSessao) box.sessaoRemota = msg.deSessao;
         const alvo = box;
         // Uma mensagem de cada vez, por peer (ver `fila`).
         alvo.fila = alvo.fila.then(() => tratarSinal(alvo, msg)).catch(() => undefined);
@@ -1279,6 +1393,9 @@ export function useVoiceRoom(
         b.pc.close();
       });
       peersRef.current.clear();
+      ausentesRef.current.forEach((t) => window.clearTimeout(t));
+      ausentesRef.current.clear();
+      sessoesEncerradasRef.current.clear();
       remoteStreamsRef.current.clear();
       telaStreamsRef.current.clear();
       repescasRef.current.forEach((t) => window.clearInterval(t));
