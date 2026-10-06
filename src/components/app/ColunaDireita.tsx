@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Users } from "lucide-react";
+import { SinoDeConversas } from "@/components/app/Conversas";
 
 /**
  * A coluna da direita: em cima as transmissões (só quando tem alguém
@@ -8,22 +9,30 @@ import { Users } from "lucide-react";
  * A lista de participantes se esconde com um clique — aí, sem transmissão, a
  * coluna vira uma faixa fina com o botão de mostrar de volta, e o chat ganha a
  * largura. No celular ela é uma gaveta e mostra sempre as duas partes.
+ *
+ * O sino das conversas mora no topo dela nos dois jeitos, aberta ou fina: é o
+ * canto de cima à direita da tela, onde todo mundo procura notificação. No
+ * celular quem mostra o sino é a barra de cima (ver `BarraDoCelular`).
  */
 export function ColunaDireita({
   telas,
   participantes,
   mostrarParticipantes,
   onMostrarParticipantes,
+  comSino = true,
 }: {
   /** As transmissões, ou null quando ninguém está transmitindo. */
   telas: ReactNode | null;
   participantes: ReactNode;
   mostrarParticipantes: boolean;
   onMostrarParticipantes: () => void;
+  /** Falso no celular, onde o sino já está na barra de cima. */
+  comSino?: boolean;
 }) {
   if (!telas && !mostrarParticipantes) {
     return (
-      <aside className="border-border bg-rail flex h-full w-11 shrink-0 flex-col items-center border-l py-3">
+      <aside className="border-border bg-rail flex h-full w-11 shrink-0 flex-col items-center gap-1 border-l py-3">
+        {comSino && <SinoDeConversas />}
         <button
           type="button"
           onClick={onMostrarParticipantes}
@@ -39,6 +48,11 @@ export function ColunaDireita({
 
   return (
     <aside className="border-border bg-rail flex h-full w-72 shrink-0 flex-col border-l">
+      {comSino && (
+        <div className="border-border flex h-11 shrink-0 items-center justify-end gap-2 border-b px-2">
+          <SinoDeConversas />
+        </div>
+      )}
       {telas && (
         <div
           className={

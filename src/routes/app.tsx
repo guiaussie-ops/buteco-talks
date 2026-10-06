@@ -701,6 +701,7 @@ function AppPage() {
                     ) : null
                   }
                   mostrarParticipantes={celular || mostrarParticipantes}
+                  comSino={!celular}
                   onMostrarParticipantes={() => setMostrarParticipantes(true)}
                   participantes={
                     <Participantes

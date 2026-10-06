@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from "react";
 import { Menu, Users } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { SinoDeConversas } from "@/components/app/Conversas";
 import { cn } from "@/lib/utils";
 
 /**
@@ -86,6 +87,7 @@ export function BarraDoCelular({
       <span className="neon-sign font-display min-w-0 flex-1 truncate text-xl tracking-wider">
         {titulo}
       </span>
+      <SinoDeConversas className="size-10" />
       <button
         type="button"
         onClick={onAbrirDireita}

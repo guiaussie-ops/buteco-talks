@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BellRing, Minus, UserRound, X } from "lucide-react";
+import { Bell, BellRing, Minus, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -15,6 +15,7 @@ import { usePerfil } from "@/lib/perfil";
 import { STATUS, statusDe } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { Bottlecap } from "@/components/Bottlecap";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 const LARGURA = 340;
 const ALTURA = 440;
@@ -375,5 +376,100 @@ export function DockDeConversas() {
         <ChipDeConversa key={j.userId} janela={j} />
       ))}
     </div>
+  );
+}
+
+function LinhaDoSino({ janela, aoAbrir }: { janela: Janela; aoAbrir: () => void }) {
+  const { abrirConversa } = useConversas();
+  const pessoa = usePessoa(janela.userId);
+  const nome = pessoa.data?.display_name || pessoa.data?.username || "Alguém";
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        abrirConversa(janela.userId);
+        aoAbrir();
+      }}
+      className="hover:bg-surface-2 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors"
+    >
+      <Bottlecap name={nome} src={pessoa.data?.avatar_url} className="size-8 text-xs" />
+      <span className="min-w-0 flex-1">
+        <span className={cn("block truncate text-sm", janela.naoLidas > 0 && "font-bold")}>
+          {nome}
+        </span>
+        <span className="text-muted-foreground block truncate text-[11px]">
+          {janela.naoLidas > 0
+            ? `${janela.naoLidas} ${janela.naoLidas === 1 ? "mensagem nova" : "mensagens novas"}`
+            : janela.minimizada
+              ? "Conversa minimizada"
+              : "Conversa aberta"}
+        </span>
+      </span>
+      {janela.naoLidas > 0 && (
+        <span className="bg-destructive text-destructive-foreground rounded-full px-1.5 text-[10px] font-bold">
+          {janela.naoLidas > 99 ? "99+" : janela.naoLidas}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/**
+ * O sino do canto de cima, à direita — onde todo app põe as notificações.
+ *
+ * Existe porque o teste mostrou que só o botão minimizado no rodapé das mesas
+ * não bastava: quem voltava ao site com mensagem esperando precisou caçar onde
+ * estava o aviso. O sino mostra o total de não lidas em vermelho, balança
+ * quando o total sobe, e abre a lista de conversas para escolher qual ler.
+ */
+export function SinoDeConversas({ className }: { className?: string }) {
+  const { janelas } = useConversas();
+  const [aberto, setAberto] = useState(false);
+  const total = janelas.reduce((soma, j) => soma + j.naoLidas, 0);
+  const ordenadas = [...janelas].sort((a, b) => b.naoLidas - a.naoLidas);
+
+  // Balança a cada mensagem nova, não a cada leitura.
+  const [balancarEm, setBalancarEm] = useState(0);
+  const totalAntesRef = useRef(total);
+  useEffect(() => {
+    if (total > totalAntesRef.current) setBalancarEm(Date.now());
+    totalAntesRef.current = total;
+  }, [total]);
+
+  return (
+    <Popover open={aberto} onOpenChange={setAberto}>
+      <PopoverTrigger
+        title={total > 0 ? `${total} mensagens novas` : "Conversas"}
+        aria-label={total > 0 ? `Conversas: ${total} mensagens novas` : "Conversas"}
+        className={cn(
+          "hover:bg-surface-2 relative flex size-9 items-center justify-center rounded-lg transition-colors",
+          total > 0 ? "text-primary" : "text-muted-foreground hover:text-foreground",
+          className,
+        )}
+      >
+        <span key={balancarEm} className={cn("flex", balancarEm > 0 && "animate-tremer")}>
+          {total > 0 ? <BellRing className="size-5" /> : <Bell className="size-5" />}
+        </span>
+        {total > 0 && (
+          <span className="bg-destructive text-destructive-foreground ring-rail absolute -top-0.5 -right-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold ring-2">
+            {total > 99 ? "99+" : total}
+          </span>
+        )}
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 p-2">
+        <p className="px-2 pt-1 pb-2 text-sm font-semibold">Conversas</p>
+        {ordenadas.length === 0 ? (
+          <p className="text-muted-foreground px-2 pb-2 text-xs">
+            Nenhuma conversa por enquanto. Clique numa tampinha para chamar alguém no privado.
+          </p>
+        ) : (
+          <div className="max-h-80 space-y-0.5 overflow-y-auto">
+            {ordenadas.map((j) => (
+              <LinhaDoSino key={j.userId} janela={j} aoAbrir={() => setAberto(false)} />
+            ))}
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
