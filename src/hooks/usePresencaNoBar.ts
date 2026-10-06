@@ -67,8 +67,12 @@ export function usePresencaNoBar({
         }
         setOnline(proximo);
       })
-      .on("presence", { event: "join" }, ({ key }) => {
+      .on("presence", { event: "join" }, ({ key, currentPresences }) => {
         if (!pronto || key === meuId) return;
+        // Trocar status ou subnick republica a presença, e isso chega como um
+        // "join" de quem já estava aqui. Só é chegada se não havia ninguém
+        // com essa chave antes.
+        if (currentPresences.length > 0) return;
         toast(`${nomeDeRef.current(key)} acabou de entrar no ${serverNameRef.current}`, {
           duration: 4000,
         });
