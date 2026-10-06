@@ -79,7 +79,7 @@ type VoiceContextValue = {
    * da minha aba: mutar alguem nao avisa a pessoa nem afeta o resto da mesa.
    */
   peerAudio: Record<string, AudioDoParticipante>;
-  /** 0 a 2. Acima de 1 amplifica e pode clipar - ver VOLUME_MAXIMO. */
+  /** 0 a VOLUME_MAXIMO. Acima de 1 amplifica - ver `ganhoEfetivo`. */
   setPeerVolume: (userId: string, volume: number) => void;
   togglePeerMute: (userId: string) => void;
   /** Meu fone esta mudo: nao ouco ninguem, e o meu microfone vai junto. */

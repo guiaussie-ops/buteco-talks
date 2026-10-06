@@ -110,7 +110,7 @@ export function ControleDeVolume({
           ) : percent > 100 ? (
             <>
               {percent}% — só pra você.{" "}
-              <span className="text-warning">Acima de 100% pode distorcer.</span>
+              <span className="text-warning">Acima de 100% amplifica a voz.</span>
             </>
           ) : (
             `${percent}% — só pra você.`

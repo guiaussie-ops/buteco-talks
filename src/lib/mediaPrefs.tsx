@@ -20,7 +20,7 @@ import { VOLUME_MAXIMO } from "@/lib/saidaDeAudio";
  * devolve exatamente o que estava antes.
  */
 export type AudioDoParticipante = {
-  /** 0 a 2. Acima de 1 amplifica e pode clipar — ver VOLUME_MAXIMO. */
+  /** 0 a VOLUME_MAXIMO. Acima de 1 amplifica — ver `ganhoEfetivo`. */
   volume: number;
   muted: boolean;
 };

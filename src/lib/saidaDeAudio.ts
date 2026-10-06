@@ -2,7 +2,7 @@
  * Saída de áudio da mesa — um grafo só, com um ganho por participante e um
  * ganho mestre no fim.
  *
- *   stream remoto → source → ganhoDoPeer → ganhoMestre → destination
+ *   stream remoto → source → ganhoDoPeer → ganhoMestre → limitador → destination
  *
  * O ganho do peer é o volume individual e o mudo local; o mestre é o "mutar
  * meu fone". Os dois são GainNode porque é o único ponto do caminho de saída
@@ -39,17 +39,23 @@
 const SUAVIZACAO = 0.02;
 
 /**
- * Teto do volume individual. Acima de 1.0 o sinal é AMPLIFICADO, e amplificar
- * uma faixa que já vem no talo do outro lado clipa — distorce, não fica mais
- * alto. É o mesmo teto do Discord, e existe pela mesma razão: às vezes a
- * pessoa está baixa na origem e não tem outro jeito. Quem passa de 100% está
- * escolhendo o risco.
+ * Teto do volume individual, na escala do slider (3 = 300%). Acima de 1.0 o
+ * sinal é AMPLIFICADO; o que impede isso de virar distorção é o limitador no
+ * fim do grafo.
  */
-export const VOLUME_MAXIMO = 2;
+export const VOLUME_MAXIMO = 3;
 
-/** Ganho que de fato vai ao nó: mudo vence o volume, e não o apaga. */
+/**
+ * Ganho que de fato vai ao nó: mudo vence o volume, e não o apaga.
+ *
+ * Até 100% é linear, e abaixar sempre funcionou bem assim. Acima, a curva é
+ * quadrática: 200% vira 4× (+12 dB) e 300% vira 9× (+19 dB). Linear, o 200%
+ * era só +6 dB — o ouvido mal percebe, e "aumentar não faz quase nada" foi
+ * exatamente o que apareceu no teste.
+ */
 export function ganhoEfetivo(volume: number, muted: boolean) {
-  return muted ? 0 : volume;
+  if (muted) return 0;
+  return volume <= 1 ? volume : volume * volume;
 }
 
 type Ramo = {
@@ -90,7 +96,21 @@ export function criarSaidaDeAudio(): SaidaDeAudio | null {
   const ctx = new AudioCtx();
   const mestre = ctx.createGain();
   mestre.gain.value = 1;
-  mestre.connect(ctx.destination);
+  // Limitador: quem foi aumentado para 300% bate no teto sem estourar. Abaixo
+  // de -3 dBFS ele não faz nada, então a mesa em volume normal passa intacta.
+  // Navegador sem o nó segue sem limitador — só volta a poder distorcer.
+  if (typeof ctx.createDynamicsCompressor === "function") {
+    const limitador = ctx.createDynamicsCompressor();
+    limitador.threshold.value = -3;
+    limitador.knee.value = 0;
+    limitador.ratio.value = 20;
+    limitador.attack.value = 0.003;
+    limitador.release.value = 0.25;
+    mestre.connect(limitador);
+    limitador.connect(ctx.destination);
+  } else {
+    mestre.connect(ctx.destination);
+  }
 
   const ramos = new Map<string, Ramo>();
   let vivo = true;

@@ -107,6 +107,12 @@ describe("ganhoEfetivo", () => {
     expect(ganhoEfetivo(0.4, true)).toBe(0);
     expect(ganhoEfetivo(0.4, false)).toBe(0.4);
   });
+
+  it("acima de 100% sobe em curva, para aumentar ser audível", () => {
+    expect(ganhoEfetivo(1, false)).toBe(1);
+    expect(ganhoEfetivo(2, false)).toBe(4);
+    expect(ganhoEfetivo(3, false)).toBe(9);
+  });
 });
 
 describe("criarSaidaDeAudio", () => {
