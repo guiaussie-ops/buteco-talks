@@ -185,7 +185,23 @@ function AppPage() {
     () => channels.filter((c) => c.kind === "voice").map((c) => c.id),
     [channels],
   );
-  const roster = useVoiceRoster(activeServerId, idsDeVoz, voice.active?.channelId ?? null);
+  const rosterDoBanco = useVoiceRoster(activeServerId, idsDeVoz, voice.active?.channelId ?? null);
+  // A minha tampinha não espera o banco: troquei de mesa, ela sai da antiga e
+  // senta na nova no mesmo clique. Para os outros quem manda é o Realtime.
+  const minhaMesa = voice.active?.channelId ?? null;
+  const roster = useMemo(() => {
+    const myId = session?.user.id;
+    if (!myId) return rosterDoBanco;
+    const r: Record<string, string[]> = {};
+    for (const [mesa, ids] of Object.entries(rosterDoBanco)) {
+      r[mesa] = mesa === minhaMesa ? ids : ids.filter((id) => id !== myId);
+    }
+    if (minhaMesa && idsDeVoz.includes(minhaMesa)) {
+      const ali = r[minhaMesa] ?? [];
+      if (!ali.includes(myId)) r[minhaMesa] = [...ali, myId];
+    }
+    return r;
+  }, [rosterDoBanco, minhaMesa, session?.user.id, idsDeVoz]);
   const nomesDasMesas = useMemo(
     () => Object.fromEntries(channels.map((c) => [c.id, c.name])),
     [channels],

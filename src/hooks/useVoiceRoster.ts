@@ -1,19 +1,21 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { SWEEP_MS } from "@/lib/voicePresence";
 
-type Row = { channel_id: string; user_id: string };
-type Op = { kind: "add" | "remove"; channelId: string; userId: string };
+type Row = { id: string; channel_id: string; user_id: string };
+type Op = { kind: "add"; row: Row } | { kind: "remove"; id: string };
+/** Linhas de presença por id da linha. */
+type Linhas = Record<string, Row>;
 type Roster = Record<string, string[]>;
 
-function applyOp(map: Roster, op: Op): Roster {
-  const cur = map[op.channelId] ?? [];
+function applyOp(map: Linhas, op: Op): Linhas {
   if (op.kind === "add") {
-    if (cur.includes(op.userId)) return map;
-    return { ...map, [op.channelId]: [...cur, op.userId] };
+    if (map[op.row.id]) return map;
+    return { ...map, [op.row.id]: op.row };
   }
-  if (!cur.includes(op.userId)) return map;
-  return { ...map, [op.channelId]: cur.filter((u) => u !== op.userId) };
+  if (!map[op.id]) return map;
+  const { [op.id]: _, ...resto } = map;
+  return resto;
 }
 
 /**
@@ -23,6 +25,11 @@ function applyOp(map: Roster, op: Op): Roster {
  * a lista aparece mesmo para quem não entrou na mesa. O filtro do Realtime só
  * aceita uma igualdade, então assinamos a tabela e recortamos no cliente — o RLS
  * já garante que só chegam linhas dos butecos em que a pessoa está.
+ *
+ * A lista é guardada POR ID DA LINHA, e não por mesa. Com RLS ligado, o
+ * Realtime manda o DELETE só com a chave primária no `old` — sem `channel_id`
+ * nem `user_id`. Recortar por mesa jogava esses eventos fora, e quem trocava de
+ * mesa ficava sentado nas duas até a releitura periódica, uns 30 s depois.
  */
 export function useVoiceRoster(
   serverId: string | null,
@@ -30,7 +37,7 @@ export function useVoiceRoster(
   /** mesa em que EU estou — mudou, refaz a leitura para não depender só do Realtime */
   selfChannelId: string | null,
 ) {
-  const [roster, setRoster] = useState<Roster>({});
+  const [linhas, setLinhas] = useState<Linhas>({});
   const key = channelIds.join(",");
   const idsRef = useRef<Set<string>>(new Set());
   idsRef.current = new Set(channelIds);
@@ -45,7 +52,7 @@ export function useVoiceRoster(
 
   useEffect(() => {
     if (!serverId || idsRef.current.size === 0) {
-      setRoster({});
+      setLinhas({});
       return;
     }
     let active = true;
@@ -54,10 +61,9 @@ export function useVoiceRoster(
      * Varre os vencidos e relê a lista inteira do banco.
      *
      * Roda na montagem e de tempos em tempos. A releitura periódica é o que
-     * torna a lista auto-corrigível: antes ela nascia de um fetch e depois vivia
-     * só de eventos do Realtime, então um único evento perdido deixava um
-     * fantasma na tela até a pessoa trocar de sala. Agora o pior caso é um
-     * ciclo de atraso.
+     * torna a lista auto-corrigível: um único evento perdido não deixa mais um
+     * fantasma na tela até a pessoa trocar de sala. O pior caso é um ciclo de
+     * atraso.
      */
     const sincronizar = async () => {
       inFlightRef.current = true;
@@ -70,19 +76,21 @@ export function useVoiceRoster(
 
         const { data, error } = await supabase
           .from("voice_participants")
-          .select("channel_id, user_id")
+          .select("id, channel_id, user_id")
           .in("channel_id", Array.from(idsRef.current));
         if (error) console.error("Falha ao ler quem está nas mesas de voz", error);
         // Uma sincronização mais nova (ou o desmonte) já assumiu: resposta velha.
         if (!active) return;
+        // Leitura que falhou não apaga a lista que já estava na tela.
+        if (error) return;
 
-        let next: Roster = {};
+        let next: Linhas = {};
         ((data ?? []) as Row[]).forEach((r) => {
-          (next[r.channel_id] ??= []).push(r.user_id);
+          next[r.id] = r;
         });
         // Eventos que chegaram durante a leitura valem por cima dela.
         for (const op of pendingRef.current) next = applyOp(next, op);
-        setRoster(next);
+        setLinhas(next);
       } finally {
         // No finally para uma falha de rede não deixar a lista presa achando
         // que existe leitura em voo para sempre.
@@ -95,9 +103,9 @@ export function useVoiceRoster(
     const reconciliacao = window.setInterval(() => void sincronizar(), SWEEP_MS);
 
     const apply = (op: Op) => {
-      if (!idsRef.current.has(op.channelId)) return;
+      if (op.kind === "add" && !idsRef.current.has(op.row.channel_id)) return;
       if (inFlightRef.current) pendingRef.current.push(op);
-      setRoster((prev) => applyOp(prev, op));
+      setLinhas((prev) => applyOp(prev, op));
     };
 
     const chan = supabase
@@ -106,18 +114,18 @@ export function useVoiceRoster(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "voice_participants" },
         (payload) => {
-          const r = payload.new as Row;
-          if (r.channel_id && r.user_id)
-            apply({ kind: "add", channelId: r.channel_id, userId: r.user_id });
+          const r = payload.new as Partial<Row>;
+          if (r.id && r.channel_id && r.user_id)
+            apply({ kind: "add", row: { id: r.id, channel_id: r.channel_id, user_id: r.user_id } });
         },
       )
       .on(
         "postgres_changes",
         { event: "DELETE", schema: "public", table: "voice_participants" },
         (payload) => {
+          // Só o id vem garantido aqui (ver o comentário do hook).
           const r = payload.old as Partial<Row>;
-          if (r.channel_id && r.user_id)
-            apply({ kind: "remove", channelId: r.channel_id, userId: r.user_id });
+          if (r.id) apply({ kind: "remove", id: r.id });
         },
       )
       .subscribe();
@@ -131,5 +139,12 @@ export function useVoiceRoster(
     };
   }, [serverId, key, selfChannelId]);
 
-  return roster;
+  return useMemo(() => {
+    const roster: Roster = {};
+    for (const r of Object.values(linhas)) {
+      const cur = (roster[r.channel_id] ??= []);
+      if (!cur.includes(r.user_id)) cur.push(r.user_id);
+    }
+    return roster;
+  }, [linhas]);
 }
