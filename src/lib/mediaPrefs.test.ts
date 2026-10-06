@@ -21,12 +21,24 @@ describe("normalizarPrefs", () => {
     const prefs = normalizarPrefs({ micId: "fone", inputGain: 1.4 });
     expect(prefs.micId).toBe("fone");
     expect(prefs.inputGain).toBe(1.4);
-    expect(prefs.noiseSuppression).toBe(true);
+    expect(prefs.noiseSuppression).toBe(false);
     expect(prefs.autoGainControl).toBe(true);
     expect(prefs.echoCancellation).toBe(false);
     expect(prefs.noiseGate).toBe(false);
     expect(prefs.noiseGateThreshold).toBe(LIMIAR_PADRAO);
+    expect(prefs.noiseSuppressionIA).toBe(true);
+  });
+
+  it("IA nasce ligada também para quem herdou o desligado do padrão antigo", () => {
+    const prefs = normalizarPrefs({ noiseSuppressionIA: false, noiseSuppression: true });
+    expect(prefs.noiseSuppressionIA).toBe(true);
+    expect(prefs.noiseSuppression).toBe(false);
+  });
+
+  it("respeita quem desligou a IA no interruptor, e devolve o do navegador", () => {
+    const prefs = normalizarPrefs({ noiseSuppressionIA: false, supressaoIAEscolhida: true });
     expect(prefs.noiseSuppressionIA).toBe(false);
+    expect(prefs.noiseSuppression).toBe(true);
   });
 
   it("sons do bar: ligados por padrão, desligados quando a pessoa desligou", () => {
@@ -35,8 +47,8 @@ describe("normalizarPrefs", () => {
   });
 
   it("respeita um filtro desligado de propósito (false não vira padrão)", () => {
-    const prefs = normalizarPrefs({ noiseSuppression: false, autoGainControl: false });
-    expect(prefs.noiseSuppression).toBe(false);
+    const prefs = normalizarPrefs({ echoCancellation: true, autoGainControl: false });
+    expect(prefs.echoCancellation).toBe(true);
     expect(prefs.autoGainControl).toBe(false);
   });
 
@@ -114,7 +126,7 @@ describe("constraints de captura", () => {
     const prefs = { ...MEDIA_PREFS_PADRAO, echoCancellation: true, autoGainControl: false };
     expect(filtrosDeAudio(prefs)).toEqual({
       echoCancellation: true,
-      noiseSuppression: true,
+      noiseSuppression: false,
       autoGainControl: false,
     });
     expect(audioConstraints(prefs)).toMatchObject(filtrosDeAudio(prefs));

@@ -44,8 +44,11 @@ export type MediaPrefs = {
   /**
    * Filtros que o próprio navegador aplica no pipeline de captura.
    *
-   * Ruído e ganho automático vêm ligados, que é o que faz o microfone soar bem
-   * sem ninguém configurar nada. O cancelamento de eco vem DESLIGADO: aqui a
+   * O ganho automático vem ligado, que é o que faz o microfone soar bem sem
+   * ninguém configurar nada. O redutor de ruído do navegador fica desligado
+   * enquanto a IA cuida do ruído (ver `noiseSuppressionIA`); ele volta quando
+   * a pessoa desliga a IA, ou sozinho, em `useVoiceRoom`, se a IA não puder
+   * rodar. O cancelamento de eco vem DESLIGADO: aqui a
    * maioria usa fone, e nesse caso ele não tem eco para cancelar — só corta
    * pedaço de palavra à toa. Quem usa caixa de som liga na mão.
    */
@@ -71,12 +74,18 @@ export type MediaPrefs = {
    * gate, que só decide passa/não passa, ela separa voz de ruído dentro do
    * mesmo instante — teclado e saco de salgadinho somem enquanto você fala.
    *
-   * Nasce DESLIGADA, pelas duas razões de sempre: reativa o caminho por Web
-   * Audio, que já nos custou áudio baixo e eco, e custa CPU de verdade (um
-   * modelo rodando na thread de áudio). Quem liga é quem tem o problema e vai
-   * conferir no A/B do teste de microfone.
+   * Nasce LIGADA. No teste da mesa, desligada por padrão significou que quem
+   * tinha barulho não ligava, e quem pagava era o resto da mesa. Continua
+   * sendo escolha de cada um: quem precisar desliga no interruptor.
    */
   noiseSuppressionIA: boolean;
+  /**
+   * A pessoa já mexeu no interruptor da IA depois que ela passou a nascer
+   * ligada. Sem isto não dá para separar quem desligou de propósito de quem só
+   * herdou o `false` do padrão antigo — e esse segundo grupo tem que ganhar a
+   * IA ligada.
+   */
+  supressaoIAEscolhida: boolean;
   /**
    * Sons do bar: o "tssss" de quem chega, o "plim" de mensagem privada e o
    * zumbido do chamar atenção. Ligados por padrão, como no MSN.
@@ -92,11 +101,12 @@ export const MEDIA_PREFS_PADRAO: MediaPrefs = {
   outputVolume: 1,
   peerAudio: {},
   echoCancellation: false,
-  noiseSuppression: true,
+  noiseSuppression: false,
   autoGainControl: true,
   noiseGate: false,
   noiseGateThreshold: LIMIAR_PADRAO,
-  noiseSuppressionIA: false,
+  noiseSuppressionIA: true,
+  supressaoIAEscolhida: false,
   sons: true,
 };
 
@@ -132,6 +142,8 @@ function ler(): MediaPrefs {
 export function normalizarPrefs(cru: unknown): MediaPrefs {
   if (!cru || typeof cru !== "object") return MEDIA_PREFS_PADRAO;
   const salvo = cru as Partial<MediaPrefs>;
+  // Só vale o que foi gravado se a pessoa escolheu depois da IA virar padrão.
+  const ia = salvo.supressaoIAEscolhida === true ? salvo.noiseSuppressionIA !== false : true;
   return {
     ...MEDIA_PREFS_PADRAO,
     ...salvo,
@@ -141,11 +153,14 @@ export function normalizarPrefs(cru: unknown): MediaPrefs {
     // `??` e não `!!`: campo ausente (preferência gravada por uma versão
     // antiga) tem que cair no padrão, não virar false na marra.
     echoCancellation: salvo.echoCancellation ?? MEDIA_PREFS_PADRAO.echoCancellation,
-    noiseSuppression: salvo.noiseSuppression ?? MEDIA_PREFS_PADRAO.noiseSuppression,
+    // Os dois cortadores em série brigam pelo mesmo sinal: o do navegador só
+    // vale com a IA desligada.
+    noiseSuppression: ia ? false : (salvo.noiseSuppression ?? true),
     autoGainControl: salvo.autoGainControl ?? MEDIA_PREFS_PADRAO.autoGainControl,
     noiseGate: salvo.noiseGate ?? MEDIA_PREFS_PADRAO.noiseGate,
     noiseGateThreshold: clamp(salvo.noiseGateThreshold ?? LIMIAR_PADRAO, 0, LIMIAR_MAXIMO),
-    noiseSuppressionIA: salvo.noiseSuppressionIA ?? MEDIA_PREFS_PADRAO.noiseSuppressionIA,
+    noiseSuppressionIA: ia,
+    supressaoIAEscolhida: salvo.supressaoIAEscolhida === true,
     sons: salvo.sons ?? MEDIA_PREFS_PADRAO.sons,
   };
 }

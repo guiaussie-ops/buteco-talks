@@ -566,16 +566,15 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
               renovarTeste();
               // Dois cortadores de ruído em série brigam: o do navegador já
               // mexeu no sinal quando o modelo o recebe, e o resultado é voz
-              // com buraco. Ligar a IA desliga o do navegador, desligar devolve
-              // — que é o padrão de quem nunca mexeu em nada disto.
-              setPrefs({ noiseSuppressionIA: v, noiseSuppression: !v });
+              // com buraco. Ligar a IA desliga o do navegador, desligar devolve.
+              setPrefs({ noiseSuppressionIA: v, noiseSuppression: !v, supressaoIAEscolhida: true });
             }}
           />
         </div>
         <p className="text-muted-foreground -mt-2 text-xs">
           Um modelo pequeno rodando aqui no seu navegador, que separa a sua voz do resto — teclado,
-          saco de salgadinho, ventilador — inclusive enquanto você fala. Vem desligada: custa CPU e
-          baixa uns 200 KB na primeira vez que você liga.
+          saco de salgadinho, ventilador — inclusive enquanto você fala. Vem ligada; desligue se o
+          seu computador sofrer com ela ou se ela estiver comendo a sua voz.
         </p>
 
         {semWorklet ? (

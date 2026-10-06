@@ -751,7 +751,19 @@ export function useVoiceRoom(
       gainCtxRef.current = ctx;
       gainNodeRef.current = gain;
       destinoRef.current = destino;
-      ponteDoSupressorRef.current = ponteDeSupressor(ctx, gain, meio);
+      ponteDoSupressorRef.current = ponteDeSupressor(ctx, gain, meio, (estado) => {
+        // Com a IA ligada o redutor do navegador fica desligado, para não
+        // brigar com ela. Se ela não puder rodar aqui, o do navegador volta no
+        // lugar — sem nenhum dos dois, a mesa ouviria todo o barulho de fundo.
+        if (estado !== "indisponivel" && estado !== "ligado") return;
+        const faixa = micRawRef.current?.getAudioTracks()[0];
+        void faixa
+          ?.applyConstraints({
+            ...filtrosDeAudio(prefsRef.current),
+            noiseSuppression: estado === "indisponivel",
+          })
+          .catch(() => undefined);
+      });
       ponteDoGateRef.current = ponteDeGate(ctx, meio, destino);
       // A faixa já vai ao ar sem esperar o modelo baixar: os processadores
       // entram no meio do grafo depois, e o destino — logo, a faixa publicada —

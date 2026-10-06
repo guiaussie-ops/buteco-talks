@@ -2,8 +2,8 @@
  * Supressão de ruído por IA (GTCRN) — o lado leve.
  *
  * Aqui não entra nada do modelo: o pacote, o worklet e os ~197 KB de wasm
- * moram em `gtcrn.ts`, que só é buscado por `import()` quando alguém liga o
- * interruptor. Quem deixa desligado (o padrão) não paga um byte.
+ * moram em `gtcrn.ts`, que só é buscado por `import()` quando a IA liga.
+ * Quem desliga o interruptor não paga um byte.
  *
  * A forma é irmã da `ponteDeGate`, e de propósito não compartilha código com
  * ela: o gate liga e desliga na hora e tem um parâmetro ao vivo, enquanto este
