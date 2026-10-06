@@ -1,10 +1,18 @@
 import { useMemo } from "react";
-import { PanelRightClose, Settings2, Volume2 } from "lucide-react";
+import { MessageCircle, PanelRightClose, Settings2, UserRound, Volume2 } from "lucide-react";
+import { useAuth } from "@/lib/auth";
 import { usePerfil } from "@/lib/perfil";
+import { useConversas } from "@/lib/conversas";
 import { STATUS, type Status } from "@/lib/status";
 import { PESO, cargoDe, type Cargo } from "@/lib/cargos";
 import { cn } from "@/lib/utils";
 import { Bottlecap } from "@/components/Bottlecap";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 type Pessoa = {
   userId: string;
@@ -25,52 +33,66 @@ const GRUPOS_ONLINE: { cargo: Cargo; titulo: string }[] = [
 
 function Linha({ p, avatar }: { p: Pessoa; avatar: string | null | undefined }) {
   const { abrirPerfil } = usePerfil();
+  const { abrirConversa } = useConversas();
+  const { session } = useAuth();
+  const souEu = session?.user.id === p.userId;
   const online = p.status !== null;
   return (
     <li>
-      <button
-        type="button"
-        onClick={() => abrirPerfil(p.userId)}
-        title={`Ver o perfil de ${p.nome}`}
-        className={cn(
-          "hover:bg-surface-2/70 flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors",
-          !online && "opacity-50 hover:opacity-90",
-        )}
-      >
-        <span className="relative shrink-0">
-          <Bottlecap name={p.nome} src={avatar} className="size-8 text-xs" />
-          {online && (
+      {/* O clique pergunta o que fazer: ver o perfil ou chamar no privado. */}
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger
+          title={p.nome}
+          className={cn(
+            "hover:bg-surface-2/70 flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors",
+            !online && "opacity-50 hover:opacity-90",
+          )}
+        >
+          <span className="relative shrink-0">
+            <Bottlecap name={p.nome} src={avatar} className="size-8 text-xs" />
+            {online && (
+              <span
+                className={cn(
+                  "border-rail absolute -right-0.5 -bottom-0.5 size-3 rounded-full border-2",
+                  STATUS[p.status!].cor,
+                )}
+              />
+            )}
+          </span>
+          <span className="min-w-0 flex-1">
             <span
               className={cn(
-                "border-rail absolute -right-0.5 -bottom-0.5 size-3 rounded-full border-2",
-                STATUS[p.status!].cor,
+                "block truncate text-sm",
+                p.cargo === "owner" ? "text-primary font-semibold" : "font-medium",
               )}
-            />
-          )}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span
-            className={cn(
-              "block truncate text-sm",
-              p.cargo === "owner" ? "text-primary font-semibold" : "font-medium",
-            )}
-          >
-            {p.nome}
-          </span>
-          {p.mesaDeVoz ? (
-            <span className="text-muted-foreground flex items-center gap-1 truncate text-[11px]">
-              <Volume2 className="size-3 shrink-0" />
-              <span className="truncate">{p.mesaDeVoz}</span>
+            >
+              {p.nome}
             </span>
-          ) : (
-            p.subnick && (
-              <span className="text-muted-foreground block truncate text-[11px] italic">
-                {p.subnick}
+            {p.mesaDeVoz ? (
+              <span className="text-muted-foreground flex items-center gap-1 truncate text-[11px]">
+                <Volume2 className="size-3 shrink-0" />
+                <span className="truncate">{p.mesaDeVoz}</span>
               </span>
-            )
+            ) : (
+              p.subnick && (
+                <span className="text-muted-foreground block truncate text-[11px] italic">
+                  {p.subnick}
+                </span>
+              )
+            )}
+          </span>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="left" align="start" className="w-48">
+          <DropdownMenuItem onSelect={() => abrirPerfil(p.userId)}>
+            <UserRound className="size-4" /> Ver perfil
+          </DropdownMenuItem>
+          {!souEu && (
+            <DropdownMenuItem onSelect={() => abrirConversa(p.userId)}>
+              <MessageCircle className="size-4" /> Mandar mensagem
+            </DropdownMenuItem>
           )}
-        </span>
-      </button>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </li>
   );
 }
