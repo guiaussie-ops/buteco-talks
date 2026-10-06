@@ -3,7 +3,7 @@
  *
  * - chegada: o "tssss" de garrafa abrindo, quando alguém entra no bar;
  * - mensagem: um "plim" de dois tons, na conversa privada;
- * - atenção: o zumbido trêmulo do "chamar atenção".
+ * - atenção: o chacoalho e o sininho do "chamar atenção".
  *
  * Contexto de áudio próprio e separado do da mesa de voz de propósito: estes
  * são sons de interface, curtos, e não passam perto do microfone nem do grafo
@@ -104,27 +104,71 @@ export function tocarMensagem() {
   });
 }
 
-/** Zumbido grave e trêmulo, do tamanho da sacudida da janela. */
+/**
+ * Chamar atenção: a janela chacoalhando e depois um sininho.
+ *
+ * O primeiro era uma onda quadrada grave tremendo, e no teste soou como
+ * defeito de caixa de som, não como alguém cutucando. Agora são duas partes:
+ * oito batidas secas e rápidas — madeira, não buzina —, no ritmo da sacudida
+ * da janela, e por cima três notas subindo, claras, que é o que faz a pessoa
+ * olhar para a tela mesmo de longe.
+ */
 export function tocarAtencao() {
   const c = contexto();
   if (!c || c.state !== "running") return;
   const t = c.currentTime;
-  const o = c.createOscillator();
-  o.type = "square";
-  o.frequency.value = 110;
-  const tremolo = c.createOscillator();
-  tremolo.frequency.value = 22;
-  const profundidade = c.createGain();
-  profundidade.gain.value = 40;
-  tremolo.connect(profundidade);
-  profundidade.connect(o.frequency);
-  const filtro = c.createBiquadFilter();
-  filtro.type = "lowpass";
-  filtro.frequency.value = 900;
-  o.connect(filtro);
-  filtro.connect(envelope(c, t, 0.02, 0.6, VOLUME * 0.8));
-  o.start(t);
-  tremolo.start(t);
-  o.stop(t + 0.62);
-  tremolo.stop(t + 0.62);
+
+  // Chacoalho: cada batida é um estalo de ruído curto com um "toc" grave.
+  const batidas = 8;
+  const passo = 0.055;
+  const amostras = Math.floor(c.sampleRate * 0.03);
+  const buffer = c.createBuffer(1, amostras, c.sampleRate);
+  const dados = buffer.getChannelData(0);
+  for (let i = 0; i < amostras; i++) dados[i] = (Math.random() * 2 - 1) * (1 - i / amostras);
+  for (let i = 0; i < batidas; i++) {
+    const inicio = t + i * passo;
+    // Alterna esquerda/direita no tom, como a janela indo e voltando.
+    const grave = i % 2 === 0 ? 190 : 150;
+    const toc = c.createOscillator();
+    toc.type = "sine";
+    toc.frequency.setValueAtTime(grave * 1.6, inicio);
+    toc.frequency.exponentialRampToValueAtTime(grave, inicio + 0.03);
+    toc.connect(envelope(c, inicio, 0.002, 0.05, VOLUME * 1.1));
+    toc.start(inicio);
+    toc.stop(inicio + 0.06);
+
+    const estalo = c.createBufferSource();
+    estalo.buffer = buffer;
+    const filtro = c.createBiquadFilter();
+    filtro.type = "bandpass";
+    filtro.frequency.value = i % 2 === 0 ? 1800 : 1400;
+    filtro.Q.value = 1.2;
+    estalo.connect(filtro);
+    filtro.connect(envelope(c, inicio, 0.001, 0.035, VOLUME * 0.7));
+    estalo.start(inicio);
+    estalo.stop(inicio + 0.04);
+  }
+
+  // Sininho: três notas subindo (mi, sol#, si), cada uma com um harmônico leve.
+  const depois = t + batidas * passo + 0.04;
+  [
+    [1318.5, 0],
+    [1661.2, 0.09],
+    [1975.5, 0.18],
+  ].forEach(([freq, atraso]) => {
+    const inicio = depois + atraso!;
+    const dur = atraso === 0.18 ? 0.5 : 0.22;
+    const nota = c.createOscillator();
+    nota.type = "triangle";
+    nota.frequency.value = freq!;
+    nota.connect(envelope(c, inicio, 0.006, dur, VOLUME * 1.1));
+    nota.start(inicio);
+    nota.stop(inicio + dur + 0.02);
+    const brilho = c.createOscillator();
+    brilho.type = "sine";
+    brilho.frequency.value = freq! * 2;
+    brilho.connect(envelope(c, inicio, 0.004, dur * 0.6, VOLUME * 0.25));
+    brilho.start(inicio);
+    brilho.stop(inicio + dur);
+  });
 }
