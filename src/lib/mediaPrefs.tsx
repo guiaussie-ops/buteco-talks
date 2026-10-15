@@ -9,6 +9,13 @@ import {
 } from "react";
 import { LIMIAR_MAXIMO, LIMIAR_PADRAO } from "@/lib/gateDeRuido";
 import { VOLUME_MAXIMO } from "@/lib/saidaDeAudio";
+import {
+  ATRASO_PTT_MAXIMO_MS,
+  ATRASO_PTT_PADRAO_MS,
+  TECLA_PTT_PADRAO,
+  teclaPermitida,
+  type TeclaPtt,
+} from "@/lib/pushToTalk";
 
 /**
  * O que você escolheu para UMA pessoa da mesa. Só para você: nada disto sai
@@ -91,6 +98,15 @@ export type MediaPrefs = {
    * zumbido do chamar atenção. Ligados por padrão, como no MSN.
    */
   sons: boolean;
+  /**
+   * Como o microfone abre. "voz" é o de sempre: aberto, e quem decide o que
+   * passa é a IA e o gate. "ptt" é o aperte-para-falar: a faixa só manda som
+   * enquanto a tecla estiver apertada. Escolha de cada pessoa.
+   */
+  modoDeFala: "voz" | "ptt";
+  teclaPtt: TeclaPtt;
+  /** Quanto o microfone segura aberto depois de soltar a tecla. */
+  atrasoPttMs: number;
 };
 
 export const MEDIA_PREFS_PADRAO: MediaPrefs = {
@@ -108,6 +124,9 @@ export const MEDIA_PREFS_PADRAO: MediaPrefs = {
   noiseSuppressionIA: true,
   supressaoIAEscolhida: false,
   sons: true,
+  modoDeFala: "voz",
+  teclaPtt: TECLA_PTT_PADRAO,
+  atrasoPttMs: ATRASO_PTT_PADRAO_MS,
 };
 
 const CHAVE = "buteco:media-prefs";
@@ -162,6 +181,11 @@ export function normalizarPrefs(cru: unknown): MediaPrefs {
     noiseSuppressionIA: ia,
     supressaoIAEscolhida: salvo.supressaoIAEscolhida === true,
     sons: salvo.sons ?? MEDIA_PREFS_PADRAO.sons,
+    modoDeFala: salvo.modoDeFala === "ptt" ? "ptt" : "voz",
+    teclaPtt: lerTeclaPtt(salvo.teclaPtt),
+    atrasoPttMs: Math.round(
+      clamp(salvo.atrasoPttMs ?? ATRASO_PTT_PADRAO_MS, 0, ATRASO_PTT_MAXIMO_MS),
+    ),
   };
 }
 
@@ -198,6 +222,14 @@ function lerPeerAudio(salvo: Partial<MediaPrefs> & { peerVolumes?: unknown }) {
   }
 
   return saida;
+}
+
+/** Tecla gravada torta ou proibida volta para a padrão, em vez de travar o PTT. */
+function lerTeclaPtt(cru: unknown): TeclaPtt {
+  if (!cru || typeof cru !== "object") return TECLA_PTT_PADRAO;
+  const { code, rotulo } = cru as Partial<TeclaPtt>;
+  if (typeof code !== "string" || !teclaPermitida(code)) return TECLA_PTT_PADRAO;
+  return { code, rotulo: typeof rotulo === "string" && rotulo ? rotulo : code };
 }
 
 function clamp(v: number, min: number, max: number) {

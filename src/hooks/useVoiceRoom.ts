@@ -288,6 +288,13 @@ export function useVoiceRoom(
   /** Espelho de micOn, para reaplicar o mudo quando a faixa publicada troca. */
   const micOnRef = useRef(true);
   /**
+   * A tecla do aperte-para-falar. Fica `true` no modo de voz normal. Não vai
+   * para a presença: quem está no PTT continua "de microfone aberto" para a
+   * mesa, como no Discord, e só a faixa muda. Publicar a cada aperto faria o
+   * ícone de mudo piscar na tela de todo mundo a cada frase.
+   */
+  const portaoPttRef = useRef(true);
+  /**
    * Quem pediu para assistir a MINHA transmissão, lido da presença dos outros.
    * É a lista que decide para quais peers a faixa de vídeo vai.
    */
@@ -635,7 +642,7 @@ export function useVoiceRoom(
 
   /** Reaplica o botão de mudo na faixa que acabou de entrar no ar. */
   const aplicarMudo = useCallback((stream: MediaStream | null) => {
-    stream?.getAudioTracks().forEach((t) => (t.enabled = micOnRef.current));
+    stream?.getAudioTracks().forEach((t) => (t.enabled = micOnRef.current && portaoPttRef.current));
   }, []);
 
   /**
@@ -1523,12 +1530,24 @@ export function useVoiceRoom(
     (ligado: boolean) => {
       if (micOnRef.current === ligado) return;
       micOnRef.current = ligado;
-      micStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = ligado));
+      micStreamRef.current
+        ?.getAudioTracks()
+        .forEach((t) => (t.enabled = ligado && portaoPttRef.current));
       setMicOnState(ligado);
       publicarPresenca();
     },
     [publicarPresenca],
   );
+
+  /**
+   * Abre e fecha a faixa pela tecla do PTT. O botão de mudo continua mandando:
+   * mutado, apertar a tecla não abre nada.
+   */
+  const setPortaoPtt = useCallback((aberto: boolean) => {
+    if (portaoPttRef.current === aberto) return;
+    portaoPttRef.current = aberto;
+    micStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = aberto && micOnRef.current));
+  }, []);
 
   const toggleMic = useCallback(() => setMicOn(!micOnRef.current), [setMicOn]);
 
@@ -1614,6 +1633,7 @@ export function useVoiceRoom(
     micStream,
     toggleMic,
     setMicOn,
+    setPortaoPtt,
     estadosDeAudio,
     remotePeers,
     localVideoStream,

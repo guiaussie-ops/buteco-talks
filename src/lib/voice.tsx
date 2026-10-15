@@ -30,6 +30,8 @@ import {
 } from "@/lib/saidaDeAudio";
 import { useSpeaking } from "@/hooks/useSpeaking";
 import { HEARTBEAT_MS, saidaComKeepalive } from "@/lib/voicePresence";
+import { apertoValeParaPtt, codeDoMouse } from "@/lib/pushToTalk";
+import { tocarPtt } from "@/lib/sons";
 
 export type VoiceTarget = { channelId: string; channelName: string; serverId: string };
 
@@ -39,6 +41,12 @@ type VoiceContextValue = {
   micOn: boolean;
   micStream: MediaStream | null;
   toggleMic: () => void;
+  /** Aperte-para-falar ligado nas preferências e você numa mesa. */
+  pttAtivo: boolean;
+  /** A tecla (ou o botão da tela) está segurando o microfone aberto agora. */
+  pttApertado: boolean;
+  /** O botão "segure para falar" da tela, para quem não tem teclado. */
+  segurarPtt: (apertado: boolean) => void;
   videoMode: "none" | "camera" | "screen";
   localVideoStream: MediaStream | null;
   remotePeers: RemotePeer[];
@@ -405,6 +413,111 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     [pararDeAssistir, assistir],
   );
 
+  /**
+   * Aperte-para-falar. A tecla é ouvida na janela inteira, mas o navegador só
+   * entrega tecla para a aba que está na frente: com o Buteco minimizado ou
+   * atrás do jogo, ela não chega aqui. Isso é limite do navegador, não nosso.
+   */
+  const pttAtivo = !!activeChannelId && prefs.modoDeFala === "ptt";
+  const [pttApertado, setPttApertado] = useState(false);
+  const teclaPttRef = useRef(prefs.teclaPtt);
+  teclaPttRef.current = prefs.teclaPtt;
+  const atrasoPttRef = useRef(prefs.atrasoPttMs);
+  atrasoPttRef.current = prefs.atrasoPttMs;
+  const sonsRef = useRef(prefs.sons);
+  sonsRef.current = prefs.sons;
+  /** Abrir e soltar de dentro do efeito, para o botão da tela usar o mesmo caminho. */
+  const pttMaosRef = useRef<((apertado: boolean) => void) | null>(null);
+  const { setPortaoPtt } = room;
+
+  useEffect(() => {
+    if (!pttAtivo) {
+      setPortaoPtt(true);
+      setPttApertado(false);
+      return;
+    }
+    setPortaoPtt(false);
+
+    /** A faixa está aberta — inclusive no atraso depois de soltar. */
+    let aberto = false;
+    let segurando = false;
+    let timer: number | null = null;
+
+    const abrir = () => {
+      segurando = true;
+      // Apertou de novo dentro do atraso: segue aberto, sem "tic" no meio da frase.
+      if (timer !== null) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
+      if (aberto) return;
+      aberto = true;
+      setPortaoPtt(true);
+      setPttApertado(true);
+      if (sonsRef.current) tocarPtt(true);
+    };
+    const soltar = () => {
+      if (!segurando) return;
+      segurando = false;
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = null;
+        aberto = false;
+        setPortaoPtt(false);
+        setPttApertado(false);
+        if (sonsRef.current) tocarPtt(false);
+      }, atrasoPttRef.current);
+    };
+    pttMaosRef.current = (apertado) => (apertado ? abrir() : soltar());
+
+    const aoApertar = (e: KeyboardEvent) => {
+      if (!apertoValeParaPtt(e.code, teclaPttRef.current, e.target)) return;
+      // Sem isto, F5 como PTT recarregaria a página e "'" rolaria a tela.
+      e.preventDefault();
+      if (!e.repeat) abrir();
+    };
+    const aoSoltar = (e: KeyboardEvent) => {
+      if (e.code === teclaPttRef.current.code) soltar();
+    };
+    // Os botões laterais são "voltar" e "avançar" do navegador: o preventDefault
+    // nas duas pontas é o que impede o PTT de tirar a pessoa da página.
+    const aoApertarMouse = (e: MouseEvent) => {
+      if (codeDoMouse(e.button) !== teclaPttRef.current.code) return;
+      e.preventDefault();
+      abrir();
+    };
+    const aoSoltarMouse = (e: MouseEvent) => {
+      if (codeDoMouse(e.button) !== teclaPttRef.current.code) return;
+      e.preventDefault();
+      soltar();
+    };
+    // Trocar de janela com a tecla apertada: o keyup vai para a outra janela e
+    // nunca chega aqui. Sem soltar no blur, o microfone ficaria aberto.
+    const aoSair = () => soltar();
+    const aoEsconder = () => {
+      if (document.visibilityState === "hidden") soltar();
+    };
+
+    window.addEventListener("keydown", aoApertar, true);
+    window.addEventListener("keyup", aoSoltar, true);
+    window.addEventListener("mousedown", aoApertarMouse, true);
+    window.addEventListener("mouseup", aoSoltarMouse, true);
+    window.addEventListener("blur", aoSair);
+    document.addEventListener("visibilitychange", aoEsconder);
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+      pttMaosRef.current = null;
+      window.removeEventListener("keydown", aoApertar, true);
+      window.removeEventListener("keyup", aoSoltar, true);
+      window.removeEventListener("mousedown", aoApertarMouse, true);
+      window.removeEventListener("mouseup", aoSoltarMouse, true);
+      window.removeEventListener("blur", aoSair);
+      document.removeEventListener("visibilitychange", aoEsconder);
+    };
+  }, [pttAtivo, setPortaoPtt]);
+
+  const segurarPtt = useCallback((apertado: boolean) => pttMaosRef.current?.(apertado), []);
+
   const speaking = useSpeaking([
     ...(userId && room.micOn ? [{ id: userId, stream: room.micStream }] : []),
     ...room.remotePeers.map((p) => ({ id: p.userId, stream: p.stream })),
@@ -522,6 +635,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       micOn: room.micOn,
       micStream: room.micStream,
       toggleMic,
+      pttAtivo,
+      pttApertado,
+      segurarPtt,
       videoMode: room.videoMode,
       localVideoStream: room.localVideoStream,
       remotePeers: room.remotePeers,
@@ -567,6 +683,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       deafened,
       toggleDeafen,
       toggleMic,
+      pttAtivo,
+      pttApertado,
+      segurarPtt,
       busy,
       join,
       leave,

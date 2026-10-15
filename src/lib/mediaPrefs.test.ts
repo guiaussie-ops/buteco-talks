@@ -8,6 +8,7 @@ import {
 } from "@/lib/mediaPrefs";
 import { LIMIAR_MAXIMO, LIMIAR_PADRAO } from "@/lib/gateDeRuido";
 import { VOLUME_MAXIMO } from "@/lib/saidaDeAudio";
+import { ATRASO_PTT_MAXIMO_MS, ATRASO_PTT_PADRAO_MS, TECLA_PTT_PADRAO } from "@/lib/pushToTalk";
 
 describe("normalizarPrefs", () => {
   it("cai no padrão quando não há nada utilizável", () => {
@@ -137,5 +138,38 @@ describe("constraints de captura", () => {
     expect(videoConstraints({ ...MEDIA_PREFS_PADRAO, cameraId: "cam" }).deviceId).toEqual({
       ideal: "cam",
     });
+  });
+});
+
+describe("aperte-para-falar nas preferências", () => {
+  it("nasce na detecção de voz, com a tecla e o atraso padrão", () => {
+    const prefs = normalizarPrefs({ micId: "fone" });
+    expect(prefs.modoDeFala).toBe("voz");
+    expect(prefs.teclaPtt).toEqual(TECLA_PTT_PADRAO);
+    expect(prefs.atrasoPttMs).toBe(ATRASO_PTT_PADRAO_MS);
+  });
+
+  it("guarda o que a pessoa escolheu", () => {
+    const prefs = normalizarPrefs({
+      modoDeFala: "ptt",
+      teclaPtt: { code: "Mouse4", rotulo: "Mouse lateral (avançar)" },
+      atrasoPttMs: 400,
+    });
+    expect(prefs.modoDeFala).toBe("ptt");
+    expect(prefs.teclaPtt.code).toBe("Mouse4");
+    expect(prefs.atrasoPttMs).toBe(400);
+  });
+
+  it("descarta modo, tecla e atraso tortos", () => {
+    const prefs = normalizarPrefs({
+      modoDeFala: "radio",
+      teclaPtt: { code: "Escape", rotulo: "Esc" },
+      atrasoPttMs: 99_999,
+    });
+    expect(prefs.modoDeFala).toBe("voz");
+    expect(prefs.teclaPtt).toEqual(TECLA_PTT_PADRAO);
+    expect(prefs.atrasoPttMs).toBe(ATRASO_PTT_MAXIMO_MS);
+    expect(normalizarPrefs({ teclaPtt: "KeyV" }).teclaPtt).toEqual(TECLA_PTT_PADRAO);
+    expect(normalizarPrefs({ atrasoPttMs: -5 }).atrasoPttMs).toBe(0);
   });
 });

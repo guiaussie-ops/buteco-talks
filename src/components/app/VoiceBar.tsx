@@ -9,6 +9,7 @@ import {
   Volume2,
 } from "lucide-react";
 import { useVoice } from "@/lib/voice";
+import { useMediaPrefs } from "@/lib/mediaPrefs";
 import { cn } from "@/lib/utils";
 
 /**
@@ -17,6 +18,7 @@ import { cn } from "@/lib/utils";
  */
 export function VoiceBar({ onOpenRoom }: { onOpenRoom?: (channelId: string) => void }) {
   const voice = useVoice();
+  const { prefs } = useMediaPrefs();
   if (!voice.active) return null;
 
   const sharing = voice.videoMode === "screen";
@@ -40,6 +42,16 @@ export function VoiceBar({ onOpenRoom }: { onOpenRoom?: (channelId: string) => v
           <span className="text-muted-foreground block text-[11px]">
             {voice.connected ? `Na mesa · ${voice.participantCount}` : "conectando..."}
           </span>
+          {voice.pttAtivo && voice.micOn && (
+            <span
+              className={cn(
+                "block text-[11px]",
+                voice.pttApertado ? "text-primary" : "text-muted-foreground",
+              )}
+            >
+              {voice.pttApertado ? "falando..." : `segure ${prefs.teclaPtt.rotulo} para falar`}
+            </span>
+          )}
         </span>
       </button>
 

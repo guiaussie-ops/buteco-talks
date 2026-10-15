@@ -21,6 +21,7 @@ import {
   type EstadoDoSupressor,
   type PonteDeSupressor,
 } from "@/lib/supressorDeRuido";
+import { ModoDeFala } from "@/components/app/ModoDeFala";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -552,6 +553,8 @@ export function VoiceVideoSettings({ ativo }: { ativo: boolean }) {
           </div>
         )}
       </div>
+
+      <ModoDeFala />
 
       <div className="border-border space-y-4 border-t pt-5">
         <div className="flex items-center justify-between gap-3">

@@ -172,3 +172,21 @@ export function tocarAtencao() {
     brilho.stop(inicio + dur);
   });
 }
+
+/**
+ * O "tic" do aperte-para-falar: agudo ao abrir, mais grave ao fechar. É a
+ * única confirmação de que a tecla pegou sem olhar para a tela — por isso
+ * curto e bem baixinho, para não chegar na mesa pelo microfone de quem usa
+ * caixa de som.
+ */
+export function tocarPtt(abrindo: boolean) {
+  const c = contexto();
+  if (!c || c.state !== "running") return;
+  const t = c.currentTime;
+  const o = c.createOscillator();
+  o.type = "sine";
+  o.frequency.value = abrindo ? 1100 : 700;
+  o.connect(envelope(c, t, 0.003, 0.05, VOLUME * 0.5));
+  o.start(t);
+  o.stop(t + 0.06);
+}

@@ -13,6 +13,7 @@ import {
   Armchair,
 } from "lucide-react";
 import { useVoice } from "@/lib/voice";
+import { useMediaPrefs } from "@/lib/mediaPrefs";
 import { Bottlecap } from "@/components/Bottlecap";
 import { Button } from "@/components/ui/button";
 import { MiniMesa } from "@/components/app/Mesas";
@@ -159,6 +160,7 @@ export function VoicePanel({
   onPuxarCadeira,
 }: Props) {
   const voice = useVoice();
+  const { prefs } = useMediaPrefs();
   const area = useAreaDaMesa();
   const sentado = voice.active?.channelId === channelId;
 
@@ -241,6 +243,28 @@ export function VoicePanel({
       </div>
 
       <div className="border-border bg-surface wood-texture flex shrink-0 flex-wrap items-center justify-center gap-2 border-t p-4">
+        {sentado && voice.pttAtivo && (
+          // Para quem não tem teclado: segurar o botão é segurar a tecla. A
+          // captura do ponteiro garante o soltar mesmo se o dedo escorregar
+          // para fora do botão.
+          <Button
+            size="sm"
+            variant={voice.pttApertado ? "default" : "secondary"}
+            disabled={!voice.micOn}
+            title={`Ou segure ${prefs.teclaPtt.rotulo} no teclado`}
+            className="touch-none select-none"
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId);
+              voice.segurarPtt(true);
+            }}
+            onPointerUp={() => voice.segurarPtt(false)}
+            onPointerCancel={() => voice.segurarPtt(false)}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <Mic className="size-4" />
+            {voice.pttApertado ? "Falando..." : "Segure para falar"}
+          </Button>
+        )}
         <Button
           variant={voice.micOn ? "secondary" : "destructive"}
           size="sm"
