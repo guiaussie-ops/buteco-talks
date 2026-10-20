@@ -47,6 +47,12 @@ import {
 
 export const Route = createFileRoute("/app")({
   ssr: false,
+  // `buteco` abre direto um buteco (quem acabou de entrar por convite cai no
+  // salão dele). Opcional, para <Link to="/app"> continuar sem search.
+  validateSearch: (search: Record<string, unknown>): { buteco?: string } => {
+    const value = search["buteco"];
+    return typeof value === "string" ? { buteco: value } : {};
+  },
   head: () => ({
     meta: [
       { title: "Meus butecos — Buteco" },
@@ -74,7 +80,8 @@ function AppPage() {
   const voice = useVoice();
   const uid = session?.user.id ?? null;
 
-  const [activeServerId, setActiveServerId] = useState<string | null>(null);
+  const { buteco: butecoPedido } = Route.useSearch();
+  const [activeServerId, setActiveServerId] = useState<string | null>(butecoPedido ?? null);
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
@@ -110,6 +117,12 @@ function AppPage() {
   useEffect(() => {
     if (!loading && !session) void navigate({ to: "/entrar" });
   }, [loading, session, navigate]);
+
+  // O pedido já virou o buteco aberto: tira da URL para recarregar a página
+  // não voltar sempre para ele.
+  useEffect(() => {
+    if (butecoPedido) void navigate({ to: "/app", search: {}, replace: true });
+  }, [butecoPedido, navigate]);
 
   const serversQuery = useQuery({
     queryKey: ["servers", uid],
@@ -337,7 +350,7 @@ function AppPage() {
       const { data, error } = await supabase.rpc("join_server_by_code", { _code: code });
       if (error) throw error;
       return data as {
-        status: "joined" | "already_member" | "not_found" | "expired" | "banned";
+        status: "joined" | "already_member" | "not_found" | "expired" | "exhausted" | "banned";
         server_id?: string;
       };
     },
@@ -347,7 +360,11 @@ function AppPage() {
         return;
       }
       if (result.status === "expired") {
-        toast.error("Esse convite venceu ou já foi usado o máximo de vezes. Peça um novo.");
+        toast.error("Esse convite venceu. Peça um novo.");
+        return;
+      }
+      if (result.status === "exhausted") {
+        toast.error("Esse convite esgotou: todas as vagas já foram usadas. Peça um novo.");
         return;
       }
       if (result.status === "banned") {

@@ -589,6 +589,7 @@ export type Database = {
         Returns: { icon_emoji: string; name: string; server_id: string }[]
       }
       channel_server_id: { Args: { _channel_id: string }; Returns: string }
+      codigo_do_convite: { Args: { _code: string }; Returns: string }
       criar_convite: {
         Args: { _max_usos?: number; _server_id: string; _validade_min?: number }
         Returns: string
@@ -635,6 +636,7 @@ export type Database = {
         Args: { _me: string; _other: string }
         Returns: boolean
       }
+      ver_convite: { Args: { _code: string }; Returns: Json }
       voice_heartbeat: { Args: { _channel_id: string }; Returns: undefined }
       voice_sweep: { Args: Record<PropertyKey, never>; Returns: number }
     }

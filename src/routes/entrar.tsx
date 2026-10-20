@@ -13,9 +13,14 @@ import { ShieldCheck } from "lucide-react";
 export const Route = createFileRoute("/entrar")({
   // O retorno precisa ter `redirect` opcional: se ele virar obrigatório, todo
   // <Link to="/entrar"> do app passa a exigir search.
-  validateSearch: (search: Record<string, unknown>): { redirect?: string } => {
+  // `aba=criar` abre direto em "Criar conta" (quem chega por convite quase
+  // sempre ainda não tem conta).
+  validateSearch: (search: Record<string, unknown>): { redirect?: string; aba?: "criar" } => {
     const value = search["redirect"];
-    return typeof value === "string" ? { redirect: value } : {};
+    return {
+      ...(typeof value === "string" ? { redirect: value } : {}),
+      ...(search["aba"] === "criar" ? { aba: "criar" as const } : {}),
+    };
   },
   head: () => ({
     meta: [
@@ -37,18 +42,18 @@ export const Route = createFileRoute("/entrar")({
 function AuthPage() {
   const navigate = useNavigate();
   const { session } = useAuth();
-  const { redirect } = Route.useSearch();
+  const { redirect, aba } = Route.useSearch();
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState("login");
+  const [tab, setTab] = useState(aba === "criar" ? "signup" : "login");
+  const codigoDoConvite = redirect?.match(/^\/convite\/([A-Za-z0-9]+)$/)?.[1];
 
   /**
    * Volta pra onde a pessoa estava antes do login. Só reconhecemos a rota de
    * convite: aceitar uma URL qualquer aqui viraria um open redirect.
    */
   const goNext = () => {
-    const code = redirect?.match(/^\/convite\/([A-Za-z0-9]+)$/)?.[1];
-    if (code) {
-      void navigate({ to: "/convite/$code", params: { code } });
+    if (codigoDoConvite) {
+      void navigate({ to: "/convite/$code", params: { code: codigoDoConvite } });
       return;
     }
     void navigate({ to: "/app" });
@@ -110,7 +115,8 @@ function AuthPage() {
       email: email.trim(),
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/app`,
+        // O link do e-mail de confirmação devolve a pessoa ao convite, não à lista vazia.
+        emailRedirectTo: `${window.location.origin}${codigoDoConvite ? `/convite/${codigoDoConvite}` : "/app"}`,
         data: {
           display_name: displayName.trim(),
           username: username.trim().toLowerCase().replace(/\s+/g, "_"),
