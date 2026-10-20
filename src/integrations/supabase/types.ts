@@ -317,6 +317,41 @@ export type Database = {
           },
         ]
       }
+      quadro_do_buteco: {
+        Row: {
+          atualizado_em: string
+          atualizado_por: string | null
+          aviso: string
+          boas_vindas: string
+          regras: string
+          server_id: string
+        }
+        Insert: {
+          atualizado_em?: string
+          atualizado_por?: string | null
+          aviso?: string
+          boas_vindas?: string
+          regras?: string
+          server_id: string
+        }
+        Update: {
+          atualizado_em?: string
+          atualizado_por?: string | null
+          aviso?: string
+          boas_vindas?: string
+          regras?: string
+          server_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quadro_do_buteco_server_id_fkey"
+            columns: ["server_id"]
+            isOneToOne: true
+            referencedRelation: "servers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       recados: {
         Row: {
           created_at: string
@@ -592,6 +627,10 @@ export type Database = {
         Returns: { channel_id: string; mencoes: number; nao_lidas: number }[]
       }
       regenerate_invite_code: { Args: { _server_id: string }; Returns: string }
+      salvar_quadro: {
+        Args: { _aviso: string; _boas_vindas: string; _regras: string; _server_id: string }
+        Returns: undefined
+      }
       shares_server_with: {
         Args: { _me: string; _other: string }
         Returns: boolean

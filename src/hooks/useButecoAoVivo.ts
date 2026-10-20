@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
 /**
- * Mantém mesas, categorias e membros do buteco aberto em dia sem recarregar:
+ * Mantém mesas, categorias, membros e o quadro do buteco aberto em dia sem recarregar:
  * a arrumação que um admin fez, o cargo novo de alguém, quem entrou e quem
  * foi expulso — inclusive eu, que preciso sumir da tela do buteco na hora.
  *
@@ -42,6 +42,16 @@ export function useButecoAoVivo(serverId: string | null, userId: string | null) 
           filter: `server_id=eq.${serverId}`,
         },
         () => recarregar(["categorias", serverId]),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "quadro_do_buteco",
+          filter: `server_id=eq.${serverId}`,
+        },
+        () => recarregar(["quadro", serverId]),
       )
       // DELETE chega sem filtro e só com o id: não dá para saber de qual buteco
       // nem de quem era. Por isso a saída de qualquer pessoa recarrega também a

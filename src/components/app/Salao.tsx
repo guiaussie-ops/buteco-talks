@@ -4,6 +4,7 @@ import { montarBlocos, type Categoria } from "@/lib/organizacao";
 import type { NaoLidas } from "@/hooks/useNaoLidas";
 import type { Channel } from "@/components/app/ChannelSidebar";
 import { MesaDoSalao } from "@/components/app/Mesas";
+import { QuadroDoButeco } from "@/components/app/QuadroDoButeco";
 
 /**
  * O salão visto de cima: a porta de entrada do buteco. Cada categoria é uma
@@ -14,6 +15,8 @@ import { MesaDoSalao } from "@/components/app/Mesas";
  * A planta sai sozinha das mesas que existem: ninguém precisa desenhar nada.
  */
 export function Salao({
+  serverId,
+  podeEditarQuadro,
   channels,
   categorias,
   roster,
@@ -22,6 +25,8 @@ export function Salao({
   avatars,
   onEntrar,
 }: {
+  serverId: string;
+  podeEditarQuadro: boolean;
   channels: Channel[];
   categorias: Categoria[];
   roster: Record<string, string[]>;
@@ -49,6 +54,9 @@ export function Salao({
       </header>
 
       <div className="piso-de-madeira scrollbar-thin flex-1 overflow-y-auto px-6 py-6 sm:px-10">
+        <div className="mb-8 flex justify-center empty:hidden">
+          <QuadroDoButeco serverId={serverId} podeEditar={podeEditarQuadro} />
+        </div>
         {channels.length === 0 && (
           <div className="bg-rail/85 mx-auto mt-16 max-w-sm rounded-xl p-6 text-center">
             <p className="font-display text-2xl tracking-wide">Salão vazio</p>
