@@ -27,7 +27,9 @@ type Detalhes = Partial<
     | "nome"
     | "nome_antes"
     | "emoji"
-    | "tipo",
+    | "tipo"
+    | "titulo"
+    | "comeca_em",
     unknown
   >
 >;
@@ -52,6 +54,12 @@ export function validadeEmTexto(minutos: number | null) {
   if (minutos < 24 * 60) return `${Math.round(minutos / 60)} h`;
   const dias = Math.round(minutos / (24 * 60));
   return dias === 1 ? "1 dia" : `${dias} dias`;
+}
+
+function dataDoEncontro(d: Detalhes) {
+  const quando = new Date(texto(d.comeca_em));
+  if (Number.isNaN(quando.getTime())) return "";
+  return `Marcado para ${quando.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} às ${quando.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
 function mesa(d: Detalhes) {
@@ -119,6 +127,12 @@ export function descreverAcao(a: AcaoDaGestao): { frase: string; detalhe?: strin
       return { frase: `apagou ${mesa(d)} "${texto(d.nome)}"` };
     case "renomeou_mesa":
       return { frase: `renomeou ${mesa(d)} "${texto(d.de)}" para "${texto(d.para)}"` };
+    case "marcou_encontro":
+      return { frase: `marcou o encontro "${texto(d.titulo)}"`, detalhe: dataDoEncontro(d) };
+    case "mudou_encontro":
+      return { frase: `mudou o encontro "${texto(d.titulo)}"`, detalhe: dataDoEncontro(d) };
+    case "cancelou_encontro":
+      return { frase: `cancelou o encontro "${texto(d.titulo)}"`, detalhe: dataDoEncontro(d) };
     default:
       return { frase: a.acao.replace(/_/g, " ") };
   }

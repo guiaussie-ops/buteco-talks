@@ -58,6 +58,17 @@ describe("descreverAcao", () => {
     );
   });
 
+  it("encontros com a data marcada", () => {
+    const comeca_em = new Date(2026, 9, 24, 21, 0).toISOString();
+    expect(descreverAcao(acao("marcou_encontro", { titulo: "Campeonato", comeca_em }))).toEqual({
+      frase: 'marcou o encontro "Campeonato"',
+      detalhe: "Marcado para 24/10 às 21:00",
+    });
+    expect(descreverAcao(acao("cancelou_encontro", { titulo: "X", comeca_em })).frase).toBe(
+      'cancelou o encontro "X"',
+    );
+  });
+
   it("ação desconhecida não quebra", () => {
     expect(descreverAcao(acao("algo_novo", null)).frase).toBe("algo novo");
   });

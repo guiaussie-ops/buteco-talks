@@ -117,6 +117,96 @@ export type Database = {
           },
         ]
       }
+      encontros: {
+        Row: {
+          cancelado_em: string | null
+          comeca_em: string
+          created_at: string
+          criado_por: string | null
+          descricao: string
+          id: string
+          mesa_id: string | null
+          server_id: string
+          titulo: string
+        }
+        Insert: {
+          cancelado_em?: string | null
+          comeca_em: string
+          created_at?: string
+          criado_por?: string | null
+          descricao?: string
+          id?: string
+          mesa_id?: string | null
+          server_id: string
+          titulo: string
+        }
+        Update: {
+          cancelado_em?: string | null
+          comeca_em?: string
+          created_at?: string
+          criado_por?: string | null
+          descricao?: string
+          id?: string
+          mesa_id?: string | null
+          server_id?: string
+          titulo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "encontros_mesa_id_fkey"
+            columns: ["mesa_id"]
+            isOneToOne: false
+            referencedRelation: "channels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "encontros_server_id_fkey"
+            columns: ["server_id"]
+            isOneToOne: false
+            referencedRelation: "servers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      presencas_em_encontros: {
+        Row: {
+          atualizado_em: string
+          encontro_id: string
+          server_id: string
+          user_id: string
+          vou: boolean
+        }
+        Insert: {
+          atualizado_em?: string
+          encontro_id: string
+          server_id: string
+          user_id: string
+          vou?: boolean
+        }
+        Update: {
+          atualizado_em?: string
+          encontro_id?: string
+          server_id?: string
+          user_id?: string
+          vou?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "presencas_em_encontros_encontro_id_fkey"
+            columns: ["encontro_id"]
+            isOneToOne: false
+            referencedRelation: "encontros"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "presencas_em_encontros_server_id_fkey"
+            columns: ["server_id"]
+            isOneToOne: false
+            referencedRelation: "servers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       mensagens_privadas: {
         Row: {
           created_at: string
@@ -591,7 +681,9 @@ export type Database = {
         Returns: { icon_emoji: string; name: string; server_id: string }[]
       }
       channel_server_id: { Args: { _channel_id: string }; Returns: string }
+      cancelar_encontro: { Args: { _id: string }; Returns: undefined }
       codigo_do_convite: { Args: { _code: string }; Returns: string }
+      confirmar_presenca: { Args: { _encontro_id: string; _vou: boolean }; Returns: undefined }
       criar_convite: {
         Args: { _max_usos?: number; _server_id: string; _validade_min?: number }
         Returns: string
@@ -644,6 +736,17 @@ export type Database = {
         Returns: { channel_id: string; mencoes: number; nao_lidas: number }[]
       }
       regenerate_invite_code: { Args: { _server_id: string }; Returns: string }
+      salvar_encontro: {
+        Args: {
+          _comeca_em: string
+          _descricao?: string
+          _id?: string
+          _mesa_id?: string
+          _server_id: string
+          _titulo: string
+        }
+        Returns: string
+      }
       salvar_quadro: {
         Args: { _aviso: string; _boas_vindas: string; _regras: string; _server_id: string }
         Returns: undefined

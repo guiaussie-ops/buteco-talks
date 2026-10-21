@@ -696,6 +696,7 @@ function AppPage() {
                   ) : (
                     <Salao
                       serverId={activeServer.id}
+                      meuId={uid!}
                       podeEditarQuadro={canManage}
                       channels={channels}
                       categorias={categorias}

@@ -5,6 +5,7 @@ import type { NaoLidas } from "@/hooks/useNaoLidas";
 import type { Channel } from "@/components/app/ChannelSidebar";
 import { MesaDoSalao } from "@/components/app/Mesas";
 import { QuadroDoButeco } from "@/components/app/QuadroDoButeco";
+import { EncontrosDoSalao } from "@/components/app/EncontrosDoSalao";
 
 /**
  * O salão visto de cima: a porta de entrada do buteco. Cada categoria é uma
@@ -16,6 +17,7 @@ import { QuadroDoButeco } from "@/components/app/QuadroDoButeco";
  */
 export function Salao({
   serverId,
+  meuId,
   podeEditarQuadro,
   channels,
   categorias,
@@ -26,6 +28,8 @@ export function Salao({
   onEntrar,
 }: {
   serverId: string;
+  meuId: string;
+  /** Dono e admins: escrevem no quadro e marcam encontros. */
   podeEditarQuadro: boolean;
   channels: Channel[];
   categorias: Categoria[];
@@ -54,8 +58,17 @@ export function Salao({
       </header>
 
       <div className="piso-de-madeira scrollbar-thin flex-1 overflow-y-auto px-6 py-6 sm:px-10">
-        <div className="mb-8 flex justify-center empty:hidden">
+        <div className="mb-8 flex flex-col items-center gap-4 empty:hidden">
           <QuadroDoButeco serverId={serverId} podeEditar={podeEditarQuadro} />
+          <EncontrosDoSalao
+            serverId={serverId}
+            meuId={meuId}
+            podeMarcar={podeEditarQuadro}
+            channels={channels}
+            names={names}
+            avatars={avatars}
+            onIrPraMesa={onEntrar}
+          />
         </div>
         {channels.length === 0 && (
           <div className="bg-rail/85 mx-auto mt-16 max-w-sm rounded-xl p-6 text-center">
