@@ -577,6 +577,8 @@ export type Database = {
         Args: { _server_id: string }
         Returns: {
           avatar_url: string | null
+          banned_by: string | null
+          banned_by_name: string | null
           created_at: string
           display_name: string | null
           reason: string | null
@@ -602,6 +604,20 @@ export type Database = {
       expulsar: {
         Args: { _banir?: boolean; _motivo?: string; _server_id: string; _user_id: string }
         Returns: undefined
+      }
+      historico_da_gestao: {
+        Args: { _antes_id?: number; _limite?: number; _server_id: string }
+        Returns: {
+          acao: string
+          alvo_id: string | null
+          alvo_nome: string | null
+          autor_avatar: string | null
+          autor_id: string | null
+          autor_nome: string | null
+          created_at: string
+          detalhes: Json
+          id: number
+        }[]
       }
       is_adult: { Args: { _user_id: string }; Returns: boolean }
       is_server_member: {

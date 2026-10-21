@@ -18,6 +18,8 @@ import { useConversas } from "@/lib/conversas";
 import { STATUS, type Status } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { Bottlecap } from "@/components/Bottlecap";
+import { HistoricoDaGestao } from "@/components/app/HistoricoDaGestao";
+import { PainelDeConvites } from "@/components/app/InviteDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -77,6 +79,9 @@ type Props = {
   /** Quem está com o app aberto neste buteco, e com que status. */
   online: Record<string, Status>;
   subnicks: Record<string, string | null>;
+  /** Só chega para quem cuida do app; para os outros a aba Convites nem aparece. */
+  inviteCode: string | null;
+  onRegenerateInvite: () => Promise<void>;
   onSair: () => Promise<void>;
 };
 
@@ -125,6 +130,8 @@ export function MembrosDialog({
   roles,
   online,
   subnicks,
+  inviteCode,
+  onRegenerateInvite,
   onSair,
 }: Props) {
   const qc = useQueryClient();
@@ -172,7 +179,12 @@ export function MembrosDialog({
     },
   });
 
-  const recarregarMembros = () => qc.invalidateQueries({ queryKey: ["members", serverId] });
+  // Toda ação daqui vira uma linha nova no histórico.
+  const recarregarMembros = () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: ["members", serverId] }),
+      qc.invalidateQueries({ queryKey: ["historico", serverId] }),
+    ]);
 
   const mudarCargo = async (p: Pessoa, cargo: Exclude<Cargo, "owner">) => {
     if (cargo === p.cargo) return;
@@ -208,6 +220,7 @@ export function MembrosDialog({
     const { error } = await supabase.rpc("desbanir", { _server_id: serverId, _user_id: id });
     if (error) return avisarErro("desbanir");
     await qc.invalidateQueries({ queryKey: ["banidos", serverId] });
+    await qc.invalidateQueries({ queryKey: ["historico", serverId] });
     toast.success(`${nome} pode voltar com um convite.`);
   };
 
@@ -353,7 +366,7 @@ export function MembrosDialog({
         <DialogContent className="wood-texture">
           <DialogHeader>
             <DialogTitle className="font-display text-2xl tracking-wide">
-              Quem senta aqui
+              {souAdmin ? "Gestão do buteco" : "Quem senta aqui"}
             </DialogTitle>
             <DialogDescription>
               {Object.keys(roles).length} {Object.keys(roles).length === 1 ? "pessoa" : "pessoas"}{" "}
@@ -363,10 +376,20 @@ export function MembrosDialog({
 
           {souAdmin ? (
             <Tabs defaultValue="membros">
-              <TabsList className="mb-3">
-                <TabsTrigger value="membros">Membros</TabsTrigger>
-                <TabsTrigger value="banidos">
+              <TabsList className="mb-3 w-full">
+                <TabsTrigger value="membros" className="flex-1">
+                  Membros
+                </TabsTrigger>
+                <TabsTrigger value="banidos" className="flex-1">
                   Banidos{banidos.length > 0 ? ` (${banidos.length})` : ""}
+                </TabsTrigger>
+                {inviteCode && (
+                  <TabsTrigger value="convites" className="flex-1">
+                    Convites
+                  </TabsTrigger>
+                )}
+                <TabsTrigger value="historico" className="flex-1">
+                  Histórico
                 </TabsTrigger>
               </TabsList>
               <TabsContent value="membros">{lista}</TabsContent>
@@ -387,7 +410,10 @@ export function MembrosDialog({
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium">{nome}</p>
                           <p className="text-muted-foreground truncate text-xs">
-                            {b.reason ? `Motivo: ${b.reason}` : "Sem motivo anotado"} ·{" "}
+                            {b.reason ? `Motivo: ${b.reason}` : "Sem motivo anotado"}
+                          </p>
+                          <p className="text-muted-foreground truncate text-[11px]">
+                            {b.banned_by_name ? `Banido por ${b.banned_by_name}` : "Banido"} em{" "}
                             {new Date(b.created_at).toLocaleDateString("pt-BR")}
                           </p>
                         </div>
@@ -407,6 +433,22 @@ export function MembrosDialog({
                     </li>
                   )}
                 </ul>
+              </TabsContent>
+              {inviteCode && (
+                <TabsContent value="convites">
+                  <div className="scrollbar-thin -mx-1 max-h-[55vh] overflow-y-auto px-1">
+                    <PainelDeConvites
+                      aberto={open}
+                      inviteCode={inviteCode}
+                      serverId={serverId}
+                      onRegenerate={onRegenerateInvite}
+                      names={names}
+                    />
+                  </div>
+                </TabsContent>
+              )}
+              <TabsContent value="historico">
+                <HistoricoDaGestao serverId={serverId} />
               </TabsContent>
             </Tabs>
           ) : (

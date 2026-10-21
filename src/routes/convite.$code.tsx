@@ -47,7 +47,7 @@ function InvitePage() {
   // A chave leva quem está olhando: depois do login o status muda (já é
   // membro, foi banido), e a vitrine precisa ser pedida de novo.
   const vitrine = useQuery({
-    queryKey: ["convite", code, uid],
+    queryKey: ["vitrine-do-convite", code, uid],
     enabled: !loading,
     retry: 1,
     queryFn: async () => {

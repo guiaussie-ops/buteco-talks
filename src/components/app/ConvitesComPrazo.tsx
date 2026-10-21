@@ -30,6 +30,7 @@ const USOS: { rotulo: string; max: number | null }[] = [
 
 type Convite = {
   code: string;
+  created_by: string;
   created_at: string;
   expires_at: string | null;
   max_uses: number | null;
@@ -57,7 +58,16 @@ function valeAinda(c: Convite) {
 const seletor =
   "border-input bg-surface/60 focus-visible:ring-ring h-9 w-full rounded-md border px-3 text-sm focus-visible:ring-2 focus-visible:outline-none";
 
-export function ConvitesComPrazo({ serverId, aberto }: { serverId: string; aberto: boolean }) {
+export function ConvitesComPrazo({
+  serverId,
+  aberto,
+  names = {},
+}: {
+  serverId: string;
+  aberto: boolean;
+  /** Nome de quem criou cada convite, quando a pessoa está no buteco. */
+  names?: Record<string, string>;
+}) {
   const qc = useQueryClient();
   const [validade, setValidade] = useState(5); // 7 dias
   const [usos, setUsos] = useState(0); // sem limite
@@ -70,7 +80,7 @@ export function ConvitesComPrazo({ serverId, aberto }: { serverId: string; abert
     queryFn: async (): Promise<Convite[]> => {
       const { data, error } = await supabase
         .from("server_invites")
-        .select("code, created_at, expires_at, max_uses, uses")
+        .select("code, created_by, created_at, expires_at, max_uses, uses")
         .eq("server_id", serverId)
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -115,6 +125,7 @@ export function ConvitesComPrazo({ serverId, aberto }: { serverId: string; abert
       return;
     }
     await qc.invalidateQueries({ queryKey: ["convites", serverId] });
+    toast.success("Convite revogado. O link parou de valer.");
   };
 
   return (
@@ -187,6 +198,7 @@ export function ConvitesComPrazo({ serverId, aberto }: { serverId: string; abert
                     : c.max_uses !== null && c.uses >= c.max_uses
                       ? "esgotou"
                       : "venceu"}
+                  {names[c.created_by] && ` · por ${names[c.created_by]}`}
                 </span>
                 {vale && (
                   <button

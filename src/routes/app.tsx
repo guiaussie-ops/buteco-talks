@@ -539,6 +539,7 @@ function AppPage() {
       return;
     }
     await qc.invalidateQueries({ queryKey: ["convite", uid, activeServer.id] });
+    await qc.invalidateQueries({ queryKey: ["historico", activeServer.id] });
     toast.success("Convite novo na área: " + data);
   };
 
@@ -791,6 +792,8 @@ function AppPage() {
               roles={roles}
               online={online}
               subnicks={subnicks}
+              inviteCode={conviteQuery.data ?? null}
+              onRegenerateInvite={regenerateInvite}
               onSair={sairDoButeco}
             />
           )}
