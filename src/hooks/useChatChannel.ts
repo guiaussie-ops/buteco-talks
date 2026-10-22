@@ -50,7 +50,11 @@ export function useChatChannel({ channelId, serverId, userId }: Opcoes) {
   const marcarLida = useCallback(() => {
     if (document.visibilityState !== "visible") return;
     zerarNaoLidas(qc, serverId, channelId);
-    void supabase.rpc("marcar_lida", { _channel_id: channelId });
+    // O pedido do supabase só sai quando alguém pede o resultado: sem o .then, a
+    // marca nunca chegava no banco e o selo voltava a cada recontagem.
+    supabase.rpc("marcar_lida", { _channel_id: channelId }).then(({ error }) => {
+      if (error) console.error("Falha ao marcar a mesa como lida", error);
+    });
   }, [qc, serverId, channelId]);
 
   /** Busca as citações que apontam para fora do que está carregado. */
