@@ -1,5 +1,7 @@
+import type { CSSProperties } from "react";
 import { cn } from "@/lib/utils";
 import { corDaTampinha } from "@/lib/tampinha";
+import { mobiliaDaMesa } from "@/lib/mobilia";
 import { Bottlecap } from "@/components/Bottlecap";
 
 /**
@@ -8,7 +10,8 @@ import { Bottlecap } from "@/components/Bottlecap";
  * redonda com as tampinhas de quem está sentado em volta.
  *
  * Duas escalas do mesmo desenho: a miniatura da barra lateral e a mesa grande
- * da planta do salão.
+ * da planta do salão. Na grande, a de voz vira mobília de buteco de verdade:
+ * plástico da cervejaria ou fórmica antiga, cada uma com as suas cadeiras.
  */
 
 /** Lugares em volta da mesa redonda, em fração do lado: cima, direita, baixo, esquerda e diagonais. */
@@ -96,6 +99,7 @@ function emVolta(i: number, total: number) {
  * de voz, puxa a cadeira).
  */
 export function MesaDoSalao({
+  id,
   tipo,
   nome,
   sentados = [],
@@ -105,6 +109,8 @@ export function MesaDoSalao({
   minha,
   onEntrar,
 }: {
+  /** Id da mesa: decide a mobília (tampo, torção e cadeiras) da mesa de voz. */
+  id: string;
   tipo: "text" | "voice";
   nome: string;
   sentados?: Sentado[];
@@ -131,8 +137,8 @@ export function MesaDoSalao({
       >
         <span
           className={cn(
-            "bg-mesa border-mesa-borda absolute inset-x-0 top-3 bottom-5 rounded-xl border-[6px] shadow-[0_14px_28px_rgb(0_0_0/0.5)] transition-transform group-hover:-translate-y-0.5",
-            aberta && "ring-primary ring-[3px]",
+            "tampo-de-madeira absolute inset-x-0 top-3 bottom-5 transition-transform group-hover:-translate-y-0.5",
+            aberta && "outline-primary outline-[3px] outline-offset-2",
           )}
         />
         <span className="bg-papel text-papel-tinta border-papel-linha absolute top-6 left-5 flex w-[150px] -rotate-3 flex-col gap-1 border-t-[3px] border-dotted px-3 py-2 shadow-[0_6px_14px_rgb(0_0_0/0.45)] transition-transform group-hover:-rotate-1">
@@ -157,22 +163,47 @@ export function MesaDoSalao({
     );
   }
 
+  const mobilia = mobiliaDaMesa(id);
+  // Vazia, a mesa mostra as cadeiras que tem, tortas junto com ela. Ocupada, cada
+  // um puxou a sua: uma cadeira embaixo de cada tampinha.
+  const vazia = sentados.length === 0;
+  const lugares = vazia ? mobilia.cadeiras.length : Math.min(sentados.length, 10);
+
   return (
     <button
       onClick={onEntrar}
-      aria-label={`Mesa de voz ${nome}, ${sentados.length === 0 ? "vazia" : `${sentados.length} sentados`}`}
-      className="group relative size-[200px] shrink-0"
+      aria-label={`Mesa de voz ${nome}, ${vazia ? "vazia" : `${sentados.length} sentados`}`}
+      className="mesa-voz group relative size-[200px] shrink-0"
+      style={{ "--giro": `${mobilia.giro}deg` } as CSSProperties}
     >
+      <span aria-hidden className="mesa-luz" />
+      <span
+        aria-hidden
+        className={cn("mesa-sombra", mobilia.tampo !== "formica-redonda" && "mesa-sombra-quadrada")}
+      />
+      {Array.from({ length: lugares }, (_, i) => (
+        <span
+          key={i}
+          aria-hidden
+          className={cn("cadeira", `cadeira-${mobilia.cadeiras[i % mobilia.cadeiras.length]}`)}
+          style={
+            {
+              "--a": `${(i * 360) / lugares + (vazia ? mobilia.giro : 0)}deg`,
+              "--r": vazia ? "76px" : "86px",
+            } as CSSProperties
+          }
+        />
+      ))}
       <span
         className={cn(
-          "bg-mesa border-mesa-borda absolute inset-[42px] flex flex-col items-center justify-center gap-1 rounded-full border-[6px] px-2 text-center shadow-[0_14px_28px_rgb(0_0_0/0.5)] transition-transform group-hover:scale-[1.03]",
-          (aberta || minha) && "ring-primary ring-[3px]",
+          "tampo-de-voz flex flex-col items-center justify-center gap-1 px-2 text-center",
+          `tampo-${mobilia.tampo}`,
+          (aberta || minha) && "tampo-minha",
         )}
       >
+        {mobilia.tampo === "plastico" && <span className="furo-do-guarda-sol" />}
         <span className="font-display line-clamp-2 text-lg leading-none tracking-wide">{nome}</span>
-        {sentados.length === 0 && (
-          <span className="text-foreground/60 text-[10px]">puxe uma cadeira</span>
-        )}
+        {vazia && <span className="text-papel-tinta/70 text-[10px]">puxe uma cadeira</span>}
       </span>
       {sentados.slice(0, 10).map((p, i) => {
         const pos = emVolta(i, Math.min(sentados.length, 10));
@@ -180,7 +211,7 @@ export function MesaDoSalao({
           <span
             key={p.id}
             title={p.nome}
-            className="absolute -translate-x-1/2 -translate-y-1/2"
+            className="absolute flex -translate-x-1/2 -translate-y-1/2 rounded-full shadow-[0_3px_6px_rgb(0_0_0/0.55)]"
             style={{ left: `${pos.left}%`, top: `${pos.top}%` }}
           >
             <Bottlecap

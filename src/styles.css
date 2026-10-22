@@ -151,6 +151,35 @@
   --text-neon-shadow:
     0 0 6px color-mix(in oklab, var(--primary) 65%, transparent),
     0 0 24px color-mix(in oklab, var(--neon) 45%, transparent);
+
+  /* o salão: chão escuro e apagado no fundo, mobília mais quente e clara recebendo a luz */
+  --chao: oklch(0.205 0.022 58);
+  --chao-junta: rgb(0 0 0 / 0.42);
+  --chao-claro: rgb(255 228 184 / 0.035);
+  --chao-escuro: rgb(0 0 0 / 0.07);
+  --placa: oklch(0.34 0.058 58);
+  --placa-fundo: oklch(0.285 0.05 56);
+  --tampo: oklch(0.47 0.085 58);
+  --tampo-espessura: oklch(0.255 0.05 50);
+  --luminaria: color-mix(in oklab, var(--primary) 19%, transparent);
+  --luminaria-fraca: color-mix(in oklab, var(--primary) 6%, transparent);
+
+  /* mesa de plástico da cervejaria */
+  --plastico: oklch(0.79 0.14 90);
+  --plastico-beira: oklch(0.71 0.135 86);
+  --plastico-fundo: oklch(0.55 0.11 78);
+  --plastico-branco: oklch(0.89 0.012 90);
+  /* mesa de fórmica com aro de alumínio, cadeira de ferro com vinil */
+  --formica-creme: oklch(0.84 0.035 85);
+  --formica-bege: oklch(0.75 0.045 72);
+  --aluminio: oklch(0.78 0.008 250);
+  --aluminio-escuro: oklch(0.55 0.01 250);
+  --aluminio-claro: oklch(0.9 0.005 250);
+  --gasto: rgb(35 26 18 / 0.88);
+  /* vinho apagado, para o neon continuar sendo a única cor forte */
+  --vinil: oklch(0.4 0.1 22);
+  --vinil-brilho: oklch(0.54 0.11 24);
+  --ferro: oklch(0.24 0.008 250);
 }
 
 .dark {
@@ -213,12 +242,114 @@
     var(--gradient-wood);
 }
 
-/* Piso de tábuas visto de cima: a planta do salão e o fundo da barra de mesas. */
+/*
+ * Piso de taco em amarração visto de cima: a planta do salão e o fundo da mesa de voz.
+ * Blocos de 144×26 com a junta desencontrada meio bloco por fileira. Juntas e tom de
+ * cada bloco saem de conic-gradients que pintam um retângulo só (o quadrante superior
+ * esquerdo de um ponto); com ladrilhos de larguras diferentes (3, 4, 5, 7 blocos...) o
+ * tom não se repete a olho. É tudo estático: pinta uma vez e o scroll só desloca.
+ */
 @utility piso-de-madeira {
-  background-color: oklch(0.3 0.05 58);
+  --bloco: 144px;
+  --fio: 26px;
+  --junta: conic-gradient(from 270deg at 1px var(--fio), var(--chao-junta) 25%, transparent 0);
+  --claro: conic-gradient(
+    from 270deg at var(--bloco) var(--fio),
+    var(--chao-claro) 25%,
+    transparent 0
+  );
+  --escuro: conic-gradient(
+    from 270deg at var(--bloco) var(--fio),
+    var(--chao-escuro) 25%,
+    transparent 0
+  );
+  background-color: var(--chao);
   background-image:
-    repeating-linear-gradient(90deg, rgb(0 0 0 / 0.22) 0 2px, transparent 2px 120px),
-    repeating-linear-gradient(0deg, oklch(0.3 0.05 58) 0 38px, oklch(0.27 0.047 58) 38px 40px);
+    /* fio entre fileiras */
+    repeating-linear-gradient(180deg, transparent 0 25px, rgb(0 0 0 / 0.38) 25px 26px),
+    /* juntas de topo, das fileiras pares e das ímpares */ var(--junta),
+    var(--junta),
+    /* tom de bloco a bloco */ var(--claro),
+    var(--escuro),
+    var(--claro),
+    var(--escuro),
+    var(--escuro),
+    var(--claro),
+    /* veio da madeira ao longo do bloco */
+      repeating-linear-gradient(180deg, transparent 0 4px, rgb(0 0 0 / 0.035) 4px 5px),
+    /* fileiras inteiras um pouco mais claras ou escuras, num ciclo de 7 */
+      repeating-linear-gradient(
+        180deg,
+        transparent 0 26px,
+        rgb(0 0 0 / 0.06) 26px 52px,
+        transparent 52px 104px,
+        rgb(255 228 184 / 0.025) 104px 130px,
+        transparent 130px 182px
+      );
+  background-size:
+    auto,
+    var(--bloco) calc(var(--fio) * 2),
+    var(--bloco) calc(var(--fio) * 2),
+    calc(var(--bloco) * 3) calc(var(--fio) * 4),
+    calc(var(--bloco) * 5) calc(var(--fio) * 6),
+    calc(var(--bloco) * 4) calc(var(--fio) * 4),
+    calc(var(--bloco) * 7) calc(var(--fio) * 6),
+    calc(var(--bloco) * 2) calc(var(--fio) * 8),
+    calc(var(--bloco) * 3) calc(var(--fio) * 10),
+    auto,
+    auto;
+  background-position:
+    0 0,
+    0 0,
+    calc(var(--bloco) / 2) var(--fio),
+    0 0,
+    calc(var(--bloco) * 2) calc(var(--fio) * 2),
+    calc(var(--bloco) / 2) var(--fio),
+    calc(var(--bloco) * 2.5) calc(var(--fio) * 3),
+    var(--bloco) calc(var(--fio) * 6),
+    calc(var(--bloco) * 1.5) calc(var(--fio) * 5),
+    0 0,
+    0 0;
+  /* o chão anda junto com as mesas quando rola */
+  background-attachment: local;
+}
+
+/*
+ * Vinheta e grão por cima da área rolável do salão, presos na janela (não rolam).
+ * O grão é ruído gerado pelo navegador (feTurbulence), sem arquivo de imagem.
+ */
+@utility salao-ambiente {
+  &::before,
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 2;
+  }
+  &::before {
+    background: radial-gradient(130% 110% at 50% 35%, transparent 50%, rgb(0 0 0 / 0.5) 100%);
+  }
+  &::after {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 1.4 -.45'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+    opacity: 0.22;
+    mix-blend-mode: overlay;
+  }
+}
+
+/* A plaquinha de cada área do salão: madeira pregada com dois pregos. */
+@utility placa-de-area {
+  padding: 3px 18px 2px;
+  border-radius: 4px;
+  background:
+    radial-gradient(circle at 8px 50%, oklch(0.22 0.03 55) 0 1.5px, transparent 2.2px),
+    radial-gradient(circle at calc(100% - 8px) 50%, oklch(0.22 0.03 55) 0 1.5px, transparent 2.2px),
+    linear-gradient(180deg, var(--placa), var(--placa-fundo));
+  box-shadow:
+    inset 0 1px 0 rgb(255 236 200 / 0.14),
+    inset 0 -1px 0 rgb(0 0 0 / 0.3),
+    0 6px 12px -4px rgb(0 0 0 / 0.6);
+  text-shadow: 0 1px 0 rgb(0 0 0 / 0.4);
 }
 
 @utility glow-ring {
@@ -321,5 +452,261 @@
     box-shadow:
       0 0 0 4px color-mix(in oklab, var(--neon) 90%, transparent),
       0 0 30px 2px color-mix(in oklab, var(--neon) 70%, transparent);
+  }
+}
+
+/* ---------- a mobília do salão (ver src/lib/mobilia.ts) ---------- */
+
+@layer components {
+  /* Luz da luminária pendurada em cima de cada mesa de voz: cai na mesa, não na sala. */
+  .mesa-luz {
+    position: absolute;
+    inset: -56px;
+    border-radius: 50%;
+    pointer-events: none;
+    background: radial-gradient(
+      closest-side,
+      var(--luminaria),
+      var(--luminaria-fraca) 55%,
+      transparent
+    );
+    opacity: 0.9;
+    transition: opacity 0.2s;
+  }
+  .mesa-voz:hover .mesa-luz {
+    opacity: 1;
+  }
+
+  /* Sombra difusa do tampo no chão, um pouco para baixo. */
+  .mesa-sombra {
+    position: absolute;
+    inset: 54px 24px 22px;
+    border-radius: 50%;
+    pointer-events: none;
+    background: radial-gradient(
+      closest-side,
+      rgb(0 0 0 / 0.62),
+      rgb(0 0 0 / 0.28) 62%,
+      transparent
+    );
+    transform: rotate(var(--giro, 0deg));
+  }
+  .mesa-sombra-quadrada {
+    inset: 58px 30px 26px;
+    border-radius: 28px;
+  }
+
+  /*
+   * Cadeira em volta da mesa: gira em torno do centro (--a) e sai --r para fora.
+   * O alto de cada desenho é o encosto, que fica do lado de fora.
+   */
+  .cadeira {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    pointer-events: none;
+    transform: rotate(var(--a)) translateY(calc(var(--r) * -1));
+  }
+  .cadeira-plastico,
+  .cadeira-plastico-branca {
+    --cor: var(--plastico);
+    width: 32px;
+    height: 26px;
+    margin: -13px 0 0 -16px;
+    border-radius: 13px 13px 7px 7px;
+    background:
+      linear-gradient(180deg, transparent 0 40%, rgb(0 0 0 / 0.14) 40% 45%, var(--cor) 45%),
+      repeating-linear-gradient(90deg, var(--cor) 0 5px, rgb(0 0 0 / 0.55) 5px 7px);
+    box-shadow:
+      inset 0 0 0 2px var(--cor),
+      inset 0 -3px 0 rgb(0 0 0 / 0.1),
+      0 3px 5px rgb(0 0 0 / 0.5);
+  }
+  .cadeira-plastico-branca {
+    --cor: var(--plastico-branco);
+  }
+  .cadeira-ferro {
+    width: 26px;
+    height: 22px;
+    margin: -11px 0 0 -13px;
+    border-radius: 4px;
+    border-top: 3px solid var(--ferro);
+    background:
+      radial-gradient(ellipse 40% 30% at 38% 40%, rgb(255 255 255 / 0.22), transparent),
+      radial-gradient(ellipse 80% 70% at 45% 45%, var(--vinil-brilho), var(--vinil) 75%);
+    box-shadow:
+      0 0 0 1.5px var(--ferro),
+      0 3px 4px rgb(0 0 0 / 0.55);
+  }
+  .cadeira-banqueta {
+    width: 24px;
+    height: 24px;
+    margin: -12px 0 0 -12px;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle at 38% 34%, rgb(255 255 255 / 0.3) 0 2px, transparent 5px),
+      radial-gradient(circle at 45% 42%, var(--vinil-brilho), var(--vinil) 60%, oklch(0.3 0.08 22));
+    box-shadow:
+      0 0 0 2px var(--aluminio),
+      0 0 0 3px rgb(0 0 0 / 0.4),
+      0 3px 4px rgb(0 0 0 / 0.5);
+  }
+
+  /* Tampo da mesa de voz: é claro, então o nome vai em tinta escura. */
+  .tampo-de-voz {
+    position: absolute;
+    color: var(--papel-tinta);
+    transform: rotate(var(--giro, 0deg));
+    transition: transform 0.15s;
+  }
+  .mesa-voz:hover .tampo-de-voz {
+    transform: rotate(var(--giro, 0deg)) scale(1.03);
+  }
+  .tampo-de-voz > * {
+    position: relative;
+  }
+  .tampo-minha {
+    outline: 3px solid var(--primary);
+    outline-offset: 3px;
+  }
+
+  /* Plástico: fosco (nenhum reflexo), riscos soltos e beira moldada. */
+  .tampo-plastico {
+    inset: 46px;
+    border-radius: 9px;
+    background:
+      linear-gradient(28deg, transparent 46%, rgb(255 255 255 / 0.24) 47% 48%, transparent 49%) 12px
+        64px / 46px 22px no-repeat,
+      linear-gradient(-14deg, transparent 46%, rgb(110 70 0 / 0.24) 47% 48.5%, transparent 50%) 58px
+        16px / 36px 14px no-repeat,
+      linear-gradient(64deg, transparent 46%, rgb(255 255 255 / 0.18) 47% 48%, transparent 49%) 74px
+        66px / 16px 28px no-repeat,
+      linear-gradient(8deg, transparent 47%, rgb(110 70 0 / 0.18) 48% 49%, transparent 50%) 16px
+        22px / 32px 8px no-repeat,
+      radial-gradient(circle at 50% 42%, rgb(255 250 220 / 0.1), transparent 70%),
+      var(--plastico);
+    box-shadow:
+      inset 0 0 0 3px var(--plastico-beira),
+      inset 0 0 0 4px rgb(90 60 0 / 0.18),
+      0 4px 0 var(--plastico-fundo),
+      0 4px 0 1px oklch(0.3 0.06 70);
+  }
+  .furo-do-guarda-sol {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: oklch(0.2 0.02 60);
+    box-shadow:
+      0 0 0 2px var(--plastico-beira),
+      inset 0 1px 2px rgb(0 0 0 / 0.6);
+  }
+
+  /*
+   * Fórmica: o fundo do tampo é o aro de alumínio escovado; a fórmica fica num
+   * ::before por dentro, com o reflexo difuso da luminária.
+   */
+  .tampo-formica-redonda,
+  .tampo-formica-quadrada {
+    box-shadow:
+      inset 0 1.5px 0 rgb(255 255 255 / 0.75),
+      inset 0 -1px 0 rgb(0 0 0 / 0.35),
+      0 3px 0 var(--aluminio-escuro),
+      0 3px 0 1px oklch(0.25 0.01 250);
+  }
+  .tampo-formica-redonda::before,
+  .tampo-formica-quadrada::before {
+    content: "";
+    position: absolute;
+    inset: 5px;
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.25);
+  }
+
+  /* redonda, granilite creme, com dois pontos onde o aro soltou */
+  .tampo-formica-redonda {
+    inset: 44px;
+    border-radius: 50%;
+    background:
+      conic-gradient(
+        from 128deg,
+        var(--gasto) 0 8deg,
+        rgb(255 255 255 / 0.65) 0 9.5deg,
+        transparent 0
+      ),
+      conic-gradient(from 302deg, var(--gasto) 0 4deg, transparent 0),
+      repeating-radial-gradient(circle, rgb(255 255 255 / 0.07) 0 1px, transparent 1px 2px),
+      conic-gradient(
+        var(--aluminio) 0deg,
+        var(--aluminio-escuro) 40deg,
+        var(--aluminio-claro) 95deg,
+        var(--aluminio-escuro) 160deg,
+        var(--aluminio) 210deg,
+        oklch(0.6 0.01 250) 270deg,
+        var(--aluminio-claro) 320deg,
+        var(--aluminio) 360deg
+      );
+  }
+  .tampo-formica-redonda::before {
+    border-radius: 50%;
+    background:
+      radial-gradient(ellipse 70% 45% at 38% 28%, rgb(255 255 255 / 0.34), transparent 70%),
+      radial-gradient(circle, oklch(0.45 0.03 60 / 0.55) 0 0.8px, transparent 1.3px) 0 0 / 7px 9px,
+      radial-gradient(circle, oklch(0.55 0.04 150 / 0.45) 0 1px, transparent 1.5px) 3px 4px / 11px
+        8px,
+      radial-gradient(circle, oklch(0.4 0.05 40 / 0.4) 0 1.2px, transparent 1.8px) 5px 2px / 17px
+        13px,
+      radial-gradient(circle, rgb(255 255 255 / 0.5) 0 0.8px, transparent 1.3px) 1px 6px / 13px 15px,
+      var(--formica-creme);
+  }
+
+  /* quadrada, fórmica bege de linho, com as quinas gastas */
+  .tampo-formica-quadrada {
+    inset: 46px;
+    border-radius: 14px;
+    background:
+      radial-gradient(circle at 3px 3px, var(--gasto) 0 4px, transparent 6px),
+      radial-gradient(
+        circle at calc(100% - 2px) calc(100% - 3px),
+        var(--gasto) 0 3.5px,
+        transparent 5.5px
+      ),
+      radial-gradient(circle at calc(100% - 4px) 4px, rgb(70 60 50 / 0.5) 0 2px, transparent 4px),
+      repeating-linear-gradient(90deg, rgb(255 255 255 / 0.08) 0 1px, transparent 1px 3px),
+      linear-gradient(
+        135deg,
+        var(--aluminio-claro),
+        var(--aluminio-escuro) 40%,
+        var(--aluminio-claro) 58%,
+        var(--aluminio) 75%,
+        var(--aluminio-escuro)
+      );
+  }
+  .tampo-formica-quadrada::before {
+    border-radius: 10px;
+    background:
+      radial-gradient(ellipse 70% 50% at 36% 28%, rgb(255 255 255 / 0.3), transparent 70%),
+      repeating-linear-gradient(0deg, rgb(0 0 0 / 0.04) 0 1px, transparent 1px 3px),
+      repeating-linear-gradient(90deg, rgb(0 0 0 / 0.03) 0 1px, transparent 1px 3px),
+      var(--formica-bege);
+  }
+
+  /* Mesa de texto: tampo de tábuas, com beira e sombra; sem luminária. */
+  .tampo-de-madeira {
+    border-radius: 12px;
+    background:
+      repeating-linear-gradient(90deg, rgb(0 0 0 / 0.08) 0 1px, transparent 1px 38px),
+      linear-gradient(168deg, oklch(0.53 0.088 63), var(--tampo) 45%, oklch(0.4 0.075 55));
+    box-shadow:
+      inset 0 1px 0 rgb(255 236 200 / 0.2),
+      inset 0 -2px 2px rgb(0 0 0 / 0.25),
+      0 0 0 1px var(--tampo-espessura),
+      0 5px 0 var(--tampo-espessura),
+      0 18px 24px -6px rgb(0 0 0 / 0.65);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mesa-luz,
+  .tampo-de-voz {
+    transition: none;
   }
 }

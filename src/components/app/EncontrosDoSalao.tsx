@@ -188,13 +188,10 @@ export function EncontrosDoSalao({
         podeMarcar && (
           <button
             onClick={() => setFormulario("novo")}
-            className="border-papel-linha/50 bg-rail/70 text-muted-foreground hover:border-primary/60 hover:text-foreground flex w-full max-w-2xl items-center gap-3 rounded-xl border-2 border-dashed px-5 py-3 text-left text-sm transition-colors"
+            title="Hora marcada numa mesa: aparece aqui pra todo mundo confirmar."
+            className="border-papel-linha/30 text-muted-foreground hover:border-primary/60 hover:text-foreground inline-flex h-8 items-center gap-1.5 rounded-full border border-dashed bg-black/30 px-3 text-xs font-medium transition-colors"
           >
-            <CalendarPlus className="size-5 shrink-0" />
-            <span>
-              <span className="text-foreground block font-medium">Marcar um encontro</span>
-              Hora marcada numa mesa: aparece aqui pra todo mundo confirmar.
-            </span>
+            <CalendarPlus className="size-3.5" /> Marcar um encontro
           </button>
         )
       )}

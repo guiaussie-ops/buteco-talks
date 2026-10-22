@@ -52,14 +52,14 @@ export function QuadroDoButeco({
   return (
     <>
       {emBranco ? (
+        // Quadro vazio é recado só para quem cuida do buteco: uma ficha pequena, que
+        // não disputa o salão com as mesas.
         <button
           onClick={() => setEditando(true)}
-          className="border-papel-linha/50 bg-rail/70 text-muted-foreground hover:border-primary/60 hover:text-foreground w-full max-w-2xl rounded-xl border-2 border-dashed px-5 py-4 text-left text-sm transition-colors"
+          title="Escreva as boas-vindas, as regras da casa e um aviso para quem chegar no salão."
+          className="border-papel-linha/30 text-muted-foreground hover:border-primary/60 hover:text-foreground inline-flex h-8 items-center gap-1.5 rounded-full border border-dashed bg-black/30 px-3 text-xs font-medium transition-colors"
         >
-          <span className="font-display text-foreground block text-xl tracking-wide">
-            O quadro tá em branco
-          </span>
-          Escreva as boas-vindas, as regras da casa e um aviso para quem chegar no salão.
+          <Pencil className="size-3.5" /> Escrever o quadro
         </button>
       ) : (
         <article className="bg-papel text-papel-tinta relative w-full max-w-2xl rounded-lg shadow-[0_10px_24px_rgb(0_0_0/0.45)]">

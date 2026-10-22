@@ -57,75 +57,82 @@ export function Salao({
         </span>
       </header>
 
-      <div className="piso-de-madeira scrollbar-thin flex-1 overflow-y-auto px-6 py-6 sm:px-10">
-        <div className="mb-8 flex flex-col items-center gap-4 empty:hidden">
-          <QuadroDoButeco serverId={serverId} podeEditar={podeEditarQuadro} />
-          <EncontrosDoSalao
-            serverId={serverId}
-            meuId={meuId}
-            podeMarcar={podeEditarQuadro}
-            channels={channels}
-            names={names}
-            avatars={avatars}
-            onIrPraMesa={onEntrar}
-          />
-        </div>
-        {channels.length === 0 && (
-          <div className="bg-rail/85 mx-auto mt-16 max-w-sm rounded-xl p-6 text-center">
-            <p className="font-display text-2xl tracking-wide">Salão vazio</p>
-            <p className="text-muted-foreground mt-1 text-sm">
-              Ainda não tem mesa nenhuma. Quem cuida do buteco pode botar a primeira pela barra da
-              esquerda.
-            </p>
+      {/* A vinheta e o grão ficam por cima, presos na janela; o chão e as mesas rolam por baixo. */}
+      <div className="salao-ambiente relative flex min-h-0 flex-1">
+        {/* Sem o overflow-x, a luz das mesas da borda faz o salão rolar de lado. */}
+        <div className="piso-de-madeira scrollbar-thin flex-1 overflow-x-hidden overflow-y-auto px-6 py-6 sm:px-10">
+          {/* Quadro e encontro ocupam a largura toda; vazios, viram duas fichas lado a lado. */}
+          <div className="mb-8 flex flex-wrap justify-center gap-x-2 gap-y-4 empty:hidden">
+            <QuadroDoButeco serverId={serverId} podeEditar={podeEditarQuadro} />
+            <EncontrosDoSalao
+              serverId={serverId}
+              meuId={meuId}
+              podeMarcar={podeEditarQuadro}
+              channels={channels}
+              names={names}
+              avatars={avatars}
+              onIrPraMesa={onEntrar}
+            />
           </div>
-        )}
-        <div className="flex flex-col gap-10">
-          {blocos
-            .filter((b) => b.mesas.length > 0)
-            .map((b) => (
-              <section key={b.categoria?.id ?? "soltas"} className="flex flex-col gap-4">
-                {b.categoria && (
-                  <h2 className="bg-rail/85 text-foreground/90 font-display w-fit rounded-md px-3 py-1 text-lg tracking-[0.12em] uppercase shadow-md">
-                    {b.categoria.name}
-                  </h2>
-                )}
-                <div className="flex flex-wrap items-start gap-x-10 gap-y-6">
-                  {b.mesas.map((c) => {
-                    if (c.kind === "voice") {
-                      const ids = roster[c.id] ?? [];
-                      const naMinha = voice.active?.channelId === c.id;
+          {channels.length === 0 && (
+            <div className="bg-rail/85 mx-auto mt-16 max-w-sm rounded-xl p-6 text-center">
+              <p className="font-display text-2xl tracking-wide">Salão vazio</p>
+              <p className="text-muted-foreground mt-1 text-sm">
+                Ainda não tem mesa nenhuma. Quem cuida do buteco pode botar a primeira pela barra da
+                esquerda.
+              </p>
+            </div>
+          )}
+          <div className="flex flex-col gap-10">
+            {blocos
+              .filter((b) => b.mesas.length > 0)
+              .map((b) => (
+                <section key={b.categoria?.id ?? "soltas"} className="flex flex-col gap-4">
+                  {b.categoria && (
+                    <h2 className="placa-de-area text-foreground font-display w-fit text-lg tracking-[0.12em] uppercase">
+                      {b.categoria.name}
+                    </h2>
+                  )}
+                  <div className="flex flex-wrap items-start gap-x-10 gap-y-6">
+                    {b.mesas.map((c) => {
+                      if (c.kind === "voice") {
+                        const ids = roster[c.id] ?? [];
+                        const naMinha = voice.active?.channelId === c.id;
+                        return (
+                          <MesaDoSalao
+                            key={c.id}
+                            id={c.id}
+                            tipo="voice"
+                            nome={c.name}
+                            minha={naMinha}
+                            sentados={ids.map((id) => ({
+                              id,
+                              nome: names[id] ?? "Participante",
+                              avatar: avatars[id],
+                              // Quem fala só é conhecido na mesa em que eu estou.
+                              falando: naMinha && !!voice.speaking[id],
+                            }))}
+                            onEntrar={() => onEntrar(c)}
+                          />
+                        );
+                      }
+                      const pendente = naoLidas[c.id];
                       return (
                         <MesaDoSalao
                           key={c.id}
-                          tipo="voice"
+                          id={c.id}
+                          tipo="text"
                           nome={c.name}
-                          minha={naMinha}
-                          sentados={ids.map((id) => ({
-                            id,
-                            nome: names[id] ?? "Participante",
-                            avatar: avatars[id],
-                            // Quem fala só é conhecido na mesa em que eu estou.
-                            falando: naMinha && !!voice.speaking[id],
-                          }))}
+                          naoLidas={pendente?.naoLidas ?? 0}
+                          mencoes={pendente?.mencoes ?? 0}
                           onEntrar={() => onEntrar(c)}
                         />
                       );
-                    }
-                    const pendente = naoLidas[c.id];
-                    return (
-                      <MesaDoSalao
-                        key={c.id}
-                        tipo="text"
-                        nome={c.name}
-                        naoLidas={pendente?.naoLidas ?? 0}
-                        mencoes={pendente?.mencoes ?? 0}
-                        onEntrar={() => onEntrar(c)}
-                      />
-                    );
-                  })}
-                </div>
-              </section>
-            ))}
+                    })}
+                  </div>
+                </section>
+              ))}
+          </div>
         </div>
       </div>
     </section>
