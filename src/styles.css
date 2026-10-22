@@ -455,21 +455,31 @@
   }
 }
 
-/* ---------- a mobília do salão (ver src/lib/mobilia.ts) ---------- */
+/* ---------- a mobília das mesas de voz (ver MobiliaDaMesa e src/lib/mobilia.ts) ---------- */
 
 @layer components {
-  /* Luz da luminária pendurada em cima de cada mesa de voz: cai na mesa, não na sala. */
+  /*
+   * A mesma mobília serve no salão (200px) e dentro da mesa (até 440px). Toda
+   * medida é em --u, o pixel da mesa de 200: quem desenha passa --k = lado / 200
+   * e tudo cresce junto. Como é só gradiente, o navegador redesenha no tamanho
+   * final: nada estica nem pixela.
+   */
+  .mobilia {
+    --k: 1;
+    --u: calc(1px * var(--k));
+  }
+
+  /*
+   * Luz da luminária pendurada em cima da mesa: cai na mesa, não na sala. O
+   * espalhamento é sombra, não tamanho, para a luz não fazer a tela rolar.
+   */
   .mesa-luz {
     position: absolute;
-    inset: -56px;
+    inset: calc(10 * var(--u));
     border-radius: 50%;
     pointer-events: none;
-    background: radial-gradient(
-      closest-side,
-      var(--luminaria),
-      var(--luminaria-fraca) 55%,
-      transparent
-    );
+    background: radial-gradient(closest-side, var(--luminaria), var(--luminaria-fraca));
+    box-shadow: 0 0 calc(48 * var(--u)) calc(22 * var(--u)) var(--luminaria-fraca);
     opacity: 0.9;
     transition: opacity 0.2s;
   }
@@ -480,7 +490,7 @@
   /* Sombra difusa do tampo no chão, um pouco para baixo. */
   .mesa-sombra {
     position: absolute;
-    inset: 54px 24px 22px;
+    inset: calc(54 * var(--u)) calc(24 * var(--u)) calc(22 * var(--u));
     border-radius: 50%;
     pointer-events: none;
     background: radial-gradient(
@@ -492,67 +502,71 @@
     transform: rotate(var(--giro, 0deg));
   }
   .mesa-sombra-quadrada {
-    inset: 58px 30px 26px;
-    border-radius: 28px;
+    inset: calc(58 * var(--u)) calc(30 * var(--u)) calc(26 * var(--u));
+    border-radius: calc(28 * var(--u));
   }
 
   /*
-   * Cadeira em volta da mesa: gira em torno do centro (--a) e sai --r para fora.
-   * O alto de cada desenho é o encosto, que fica do lado de fora.
+   * Cadeira em volta da mesa: gira em torno do centro (--a) e sai --r (em --u)
+   * para fora. O alto de cada desenho é o encosto, que fica do lado de fora.
    */
   .cadeira {
     position: absolute;
     left: 50%;
     top: 50%;
     pointer-events: none;
-    transform: rotate(var(--a)) translateY(calc(var(--r) * -1));
+    transform: rotate(var(--a)) translateY(calc(var(--r) * var(--u) * -1));
   }
   .cadeira-plastico,
   .cadeira-plastico-branca {
     --cor: var(--plastico);
-    width: 32px;
-    height: 26px;
-    margin: -13px 0 0 -16px;
-    border-radius: 13px 13px 7px 7px;
+    width: calc(32 * var(--u));
+    height: calc(26 * var(--u));
+    margin: calc(-13 * var(--u)) 0 0 calc(-16 * var(--u));
+    border-radius: calc(13 * var(--u)) calc(13 * var(--u)) calc(7 * var(--u)) calc(7 * var(--u));
     background:
       linear-gradient(180deg, transparent 0 40%, rgb(0 0 0 / 0.14) 40% 45%, var(--cor) 45%),
-      repeating-linear-gradient(90deg, var(--cor) 0 5px, rgb(0 0 0 / 0.55) 5px 7px);
+      repeating-linear-gradient(
+        90deg,
+        var(--cor) 0 calc(5 * var(--u)),
+        rgb(0 0 0 / 0.55) calc(5 * var(--u)) calc(7 * var(--u))
+      );
     box-shadow:
-      inset 0 0 0 2px var(--cor),
-      inset 0 -3px 0 rgb(0 0 0 / 0.1),
-      0 3px 5px rgb(0 0 0 / 0.5);
+      inset 0 0 0 calc(2 * var(--u)) var(--cor),
+      inset 0 calc(-3 * var(--u)) 0 rgb(0 0 0 / 0.1),
+      0 calc(3 * var(--u)) calc(5 * var(--u)) rgb(0 0 0 / 0.5);
   }
   .cadeira-plastico-branca {
     --cor: var(--plastico-branco);
   }
   .cadeira-ferro {
-    width: 26px;
-    height: 22px;
-    margin: -11px 0 0 -13px;
-    border-radius: 4px;
-    border-top: 3px solid var(--ferro);
+    width: calc(26 * var(--u));
+    height: calc(22 * var(--u));
+    margin: calc(-11 * var(--u)) 0 0 calc(-13 * var(--u));
+    border-radius: calc(4 * var(--u));
+    border-top: calc(3 * var(--u)) solid var(--ferro);
     background:
       radial-gradient(ellipse 40% 30% at 38% 40%, rgb(255 255 255 / 0.22), transparent),
       radial-gradient(ellipse 80% 70% at 45% 45%, var(--vinil-brilho), var(--vinil) 75%);
     box-shadow:
-      0 0 0 1.5px var(--ferro),
-      0 3px 4px rgb(0 0 0 / 0.55);
+      0 0 0 calc(1.5 * var(--u)) var(--ferro),
+      0 calc(3 * var(--u)) calc(4 * var(--u)) rgb(0 0 0 / 0.55);
   }
   .cadeira-banqueta {
-    width: 24px;
-    height: 24px;
-    margin: -12px 0 0 -12px;
+    width: calc(24 * var(--u));
+    height: calc(24 * var(--u));
+    margin: calc(-12 * var(--u)) 0 0 calc(-12 * var(--u));
     border-radius: 50%;
     background:
-      radial-gradient(circle at 38% 34%, rgb(255 255 255 / 0.3) 0 2px, transparent 5px),
+      radial-gradient(circle at 38% 34%, rgb(255 255 255 / 0.3) 0 8%, transparent 21%),
       radial-gradient(circle at 45% 42%, var(--vinil-brilho), var(--vinil) 60%, oklch(0.3 0.08 22));
     box-shadow:
-      0 0 0 2px var(--aluminio),
-      0 0 0 3px rgb(0 0 0 / 0.4),
-      0 3px 4px rgb(0 0 0 / 0.5);
+      0 0 0 calc(2 * var(--u)) var(--aluminio),
+      0 0 0 calc(3 * var(--u)) rgb(0 0 0 / 0.4),
+      0 calc(3 * var(--u)) calc(4 * var(--u)) rgb(0 0 0 / 0.5);
   }
 
-  /* Tampo da mesa de voz: é claro, então o nome vai em tinta escura. */
+  /* Tampo da mesa de voz: é claro, então o que vai escrito nele é tinta escura. */
   .tampo-de-voz {
     position: absolute;
     color: var(--papel-tinta);
@@ -566,39 +580,39 @@
     position: relative;
   }
   .tampo-minha {
-    outline: 3px solid var(--primary);
-    outline-offset: 3px;
+    outline: calc(3 * var(--u)) solid var(--primary);
+    outline-offset: calc(3 * var(--u));
   }
 
   /* Plástico: fosco (nenhum reflexo), riscos soltos e beira moldada. */
   .tampo-plastico {
-    inset: 46px;
-    border-radius: 9px;
+    inset: calc(46 * var(--u));
+    border-radius: calc(9 * var(--u));
     background:
-      linear-gradient(28deg, transparent 46%, rgb(255 255 255 / 0.24) 47% 48%, transparent 49%) 12px
-        64px / 46px 22px no-repeat,
-      linear-gradient(-14deg, transparent 46%, rgb(110 70 0 / 0.24) 47% 48.5%, transparent 50%) 58px
-        16px / 36px 14px no-repeat,
-      linear-gradient(64deg, transparent 46%, rgb(255 255 255 / 0.18) 47% 48%, transparent 49%) 74px
-        66px / 16px 28px no-repeat,
-      linear-gradient(8deg, transparent 47%, rgb(110 70 0 / 0.18) 48% 49%, transparent 50%) 16px
-        22px / 32px 8px no-repeat,
+      linear-gradient(28deg, transparent 46%, rgb(255 255 255 / 0.24) 47% 48%, transparent 49%)
+        calc(12 * var(--u)) calc(64 * var(--u)) / calc(46 * var(--u)) calc(22 * var(--u)) no-repeat,
+      linear-gradient(-14deg, transparent 46%, rgb(110 70 0 / 0.24) 47% 48.5%, transparent 50%)
+        calc(58 * var(--u)) calc(16 * var(--u)) / calc(36 * var(--u)) calc(14 * var(--u)) no-repeat,
+      linear-gradient(64deg, transparent 46%, rgb(255 255 255 / 0.18) 47% 48%, transparent 49%)
+        calc(74 * var(--u)) calc(66 * var(--u)) / calc(16 * var(--u)) calc(28 * var(--u)) no-repeat,
+      linear-gradient(8deg, transparent 47%, rgb(110 70 0 / 0.18) 48% 49%, transparent 50%)
+        calc(16 * var(--u)) calc(22 * var(--u)) / calc(32 * var(--u)) calc(8 * var(--u)) no-repeat,
       radial-gradient(circle at 50% 42%, rgb(255 250 220 / 0.1), transparent 70%),
       var(--plastico);
     box-shadow:
-      inset 0 0 0 3px var(--plastico-beira),
-      inset 0 0 0 4px rgb(90 60 0 / 0.18),
-      0 4px 0 var(--plastico-fundo),
-      0 4px 0 1px oklch(0.3 0.06 70);
+      inset 0 0 0 calc(3 * var(--u)) var(--plastico-beira),
+      inset 0 0 0 calc(4 * var(--u)) rgb(90 60 0 / 0.18),
+      0 calc(4 * var(--u)) 0 var(--plastico-fundo),
+      0 calc(4 * var(--u)) 0 calc(1 * var(--u)) oklch(0.3 0.06 70);
   }
   .furo-do-guarda-sol {
-    width: 8px;
-    height: 8px;
+    width: calc(8 * var(--u));
+    height: calc(8 * var(--u));
     border-radius: 50%;
     background: oklch(0.2 0.02 60);
     box-shadow:
-      0 0 0 2px var(--plastico-beira),
-      inset 0 1px 2px rgb(0 0 0 / 0.6);
+      0 0 0 calc(2 * var(--u)) var(--plastico-beira),
+      inset 0 calc(1 * var(--u)) calc(2 * var(--u)) rgb(0 0 0 / 0.6);
   }
 
   /*
@@ -608,22 +622,22 @@
   .tampo-formica-redonda,
   .tampo-formica-quadrada {
     box-shadow:
-      inset 0 1.5px 0 rgb(255 255 255 / 0.75),
-      inset 0 -1px 0 rgb(0 0 0 / 0.35),
-      0 3px 0 var(--aluminio-escuro),
-      0 3px 0 1px oklch(0.25 0.01 250);
+      inset 0 calc(1.5 * var(--u)) 0 rgb(255 255 255 / 0.75),
+      inset 0 calc(-1 * var(--u)) 0 rgb(0 0 0 / 0.35),
+      0 calc(3 * var(--u)) 0 var(--aluminio-escuro),
+      0 calc(3 * var(--u)) 0 calc(1 * var(--u)) oklch(0.25 0.01 250);
   }
   .tampo-formica-redonda::before,
   .tampo-formica-quadrada::before {
     content: "";
     position: absolute;
-    inset: 5px;
-    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.25);
+    inset: calc(5 * var(--u));
+    box-shadow: inset 0 calc(1 * var(--u)) calc(2 * var(--u)) rgb(0 0 0 / 0.25);
   }
 
   /* redonda, granilite creme, com dois pontos onde o aro soltou */
   .tampo-formica-redonda {
-    inset: 44px;
+    inset: calc(44 * var(--u));
     border-radius: 50%;
     background:
       conic-gradient(
@@ -633,7 +647,11 @@
         transparent 0
       ),
       conic-gradient(from 302deg, var(--gasto) 0 4deg, transparent 0),
-      repeating-radial-gradient(circle, rgb(255 255 255 / 0.07) 0 1px, transparent 1px 2px),
+      repeating-radial-gradient(
+        circle,
+        rgb(255 255 255 / 0.07) 0 calc(1 * var(--u)),
+        transparent calc(1 * var(--u)) calc(2 * var(--u))
+      ),
       conic-gradient(
         var(--aluminio) 0deg,
         var(--aluminio-escuro) 40deg,
@@ -645,6 +663,10 @@
         var(--aluminio) 360deg
       );
   }
+  /*
+   * Os grãos do granilite ficam em px, sem --u: ampliados, os quatro ladrilhos
+   * viram uma grade de bolinhas. No tamanho fixo, mesa maior só tem mais grão.
+   */
   .tampo-formica-redonda::before {
     border-radius: 50%;
     background:
@@ -660,17 +682,29 @@
 
   /* quadrada, fórmica bege de linho, com as quinas gastas */
   .tampo-formica-quadrada {
-    inset: 46px;
-    border-radius: 14px;
+    inset: calc(46 * var(--u));
+    border-radius: calc(14 * var(--u));
     background:
-      radial-gradient(circle at 3px 3px, var(--gasto) 0 4px, transparent 6px),
       radial-gradient(
-        circle at calc(100% - 2px) calc(100% - 3px),
-        var(--gasto) 0 3.5px,
-        transparent 5.5px
+        circle at calc(3 * var(--u)) calc(3 * var(--u)),
+        var(--gasto) 0 calc(4 * var(--u)),
+        transparent calc(6 * var(--u))
       ),
-      radial-gradient(circle at calc(100% - 4px) 4px, rgb(70 60 50 / 0.5) 0 2px, transparent 4px),
-      repeating-linear-gradient(90deg, rgb(255 255 255 / 0.08) 0 1px, transparent 1px 3px),
+      radial-gradient(
+        circle at calc(100% - 2 * var(--u)) calc(100% - 3 * var(--u)),
+        var(--gasto) 0 calc(3.5 * var(--u)),
+        transparent calc(5.5 * var(--u))
+      ),
+      radial-gradient(
+        circle at calc(100% - 4 * var(--u)) calc(4 * var(--u)),
+        rgb(70 60 50 / 0.5) 0 calc(2 * var(--u)),
+        transparent calc(4 * var(--u))
+      ),
+      repeating-linear-gradient(
+        90deg,
+        rgb(255 255 255 / 0.08) 0 calc(1 * var(--u)),
+        transparent calc(1 * var(--u)) calc(3 * var(--u))
+      ),
       linear-gradient(
         135deg,
         var(--aluminio-claro),
@@ -681,11 +715,19 @@
       );
   }
   .tampo-formica-quadrada::before {
-    border-radius: 10px;
+    border-radius: calc(10 * var(--u));
     background:
       radial-gradient(ellipse 70% 50% at 36% 28%, rgb(255 255 255 / 0.3), transparent 70%),
-      repeating-linear-gradient(0deg, rgb(0 0 0 / 0.04) 0 1px, transparent 1px 3px),
-      repeating-linear-gradient(90deg, rgb(0 0 0 / 0.03) 0 1px, transparent 1px 3px),
+      repeating-linear-gradient(
+        0deg,
+        rgb(0 0 0 / 0.04) 0 calc(1 * var(--u)),
+        transparent calc(1 * var(--u)) calc(3 * var(--u))
+      ),
+      repeating-linear-gradient(
+        90deg,
+        rgb(0 0 0 / 0.03) 0 calc(1 * var(--u)),
+        transparent calc(1 * var(--u)) calc(3 * var(--u))
+      ),
       var(--formica-bege);
   }
 

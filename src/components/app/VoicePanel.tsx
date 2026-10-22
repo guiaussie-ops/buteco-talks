@@ -16,7 +16,7 @@ import { useVoice } from "@/lib/voice";
 import { useMediaPrefs } from "@/lib/mediaPrefs";
 import { Bottlecap } from "@/components/Bottlecap";
 import { Button } from "@/components/ui/button";
-import { MiniMesa } from "@/components/app/Mesas";
+import { MiniMesa, MobiliaDaMesa } from "@/components/app/Mesas";
 import {
   ControleDeVolume,
   SeloDeMicFechado,
@@ -105,7 +105,7 @@ function Cadeira({
         src={src}
         speaking={speaking}
         className={cn(
-          "size-16 text-xl",
+          "size-16 text-xl shadow-[0_4px_10px_rgb(0_0_0/0.55)]",
           ehVoce && "ring-foreground/60 ring-2 ring-offset-2 ring-offset-transparent",
         )}
       />
@@ -185,60 +185,66 @@ export function VoicePanel({
         </span>
       </header>
 
-      <div className="piso-de-madeira scrollbar-thin relative flex flex-1 flex-col items-center justify-center overflow-auto p-6">
-        {!isAdult && (
-          <div className="border-warning/40 bg-background/90 text-warning mb-5 flex max-w-xl items-start gap-2 rounded-xl border p-3 text-sm">
-            <ShieldAlert className="mt-0.5 size-4 shrink-0" />
-            <p>
-              Sua conta está em <strong>modo protegido</strong>: você pode falar e ouvir, mas câmera
-              e compartilhamento de tela ficam desativados por ser menor de 18 anos.
-            </p>
-          </div>
-        )}
+      {/* O mesmo ambiente do salão: vinheta e grão presos na janela, por cima do chão. */}
+      <div className="salao-ambiente relative flex min-h-0 flex-1">
+        <div className="piso-de-madeira scrollbar-thin relative flex flex-1 flex-col items-center justify-center overflow-auto p-6">
+          {!isAdult && (
+            <div className="border-warning/40 bg-background/90 text-warning mb-5 flex max-w-xl items-start gap-2 rounded-xl border p-3 text-sm">
+              <ShieldAlert className="mt-0.5 size-4 shrink-0" />
+              <p>
+                Sua conta está em <strong>modo protegido</strong>: você pode falar e ouvir, mas
+                câmera e compartilhamento de tela ficam desativados por ser menor de 18 anos.
+              </p>
+            </div>
+          )}
 
-        <div className="relative shrink-0" style={{ width: area, height: area }}>
-          {/* o tampo */}
-          <div
-            className="bg-mesa border-mesa-borda absolute flex flex-col items-center justify-center gap-2 rounded-full border-[12px] text-center shadow-[0_24px_50px_rgb(0_0_0/0.55)]"
-            style={{ inset: area * 0.22 }}
-          >
-            <span className="font-display px-4 text-3xl leading-none tracking-wide">
-              {channelName}
-            </span>
-            {sentado ? (
-              <span className="text-foreground/70 text-xs">
-                {naMesa.length === 1 ? "só você por enquanto" : `${naMesa.length} sentados`}
+          <div className="relative shrink-0" style={{ width: area, height: area }}>
+            {/* a mesma mobília do salão, em tamanho grande */}
+            <MobiliaDaMesa
+              id={channelId}
+              lado={area}
+              sentados={naMesa.length}
+              destacada={sentado}
+              className="gap-2 px-3"
+            >
+              <span className="font-display text-3xl leading-none tracking-wide">
+                {channelName}
               </span>
-            ) : (
-              <Button size="sm" onClick={onPuxarCadeira}>
-                <Armchair className="size-4" /> Puxar cadeira
-              </Button>
-            )}
-          </div>
+              {sentado ? (
+                <span className="text-papel-tinta/70 text-xs">
+                  {naMesa.length === 1 ? "só você por enquanto" : `${naMesa.length} sentados`}
+                </span>
+              ) : (
+                <Button size="sm" onClick={onPuxarCadeira}>
+                  <Armchair className="size-4" /> Puxar cadeira
+                </Button>
+              )}
+            </MobiliaDaMesa>
 
-          {/* as cadeiras */}
-          {naMesa.map((id, i) => {
-            const { left, top } = lugar(i, naMesa.length, area);
-            return (
-              <div
-                key={id}
-                className="absolute -translate-x-1/2 -translate-y-1/2"
-                style={{ left, top }}
-              >
-                <Cadeira
-                  userId={id}
-                  name={names[id] ?? (id === userId ? "Você" : "Participante")}
-                  src={avatars[id]}
-                  speaking={!!voice.speaking[id]}
-                  micOff={!!voice.estadosDeAudio[id]?.micOff}
-                  transmitindo={
-                    id === userId ? voice.videoMode !== "none" : id in voice.transmissoes
-                  }
-                  ehVoce={id === userId}
-                />
-              </div>
-            );
-          })}
+            {/* quem está sentado, por cima das cadeiras */}
+            {naMesa.map((id, i) => {
+              const { left, top } = lugar(i, naMesa.length, area);
+              return (
+                <div
+                  key={id}
+                  className="absolute -translate-x-1/2 -translate-y-1/2"
+                  style={{ left, top }}
+                >
+                  <Cadeira
+                    userId={id}
+                    name={names[id] ?? (id === userId ? "Você" : "Participante")}
+                    src={avatars[id]}
+                    speaking={!!voice.speaking[id]}
+                    micOff={!!voice.estadosDeAudio[id]?.micOff}
+                    transmitindo={
+                      id === userId ? voice.videoMode !== "none" : id in voice.transmissoes
+                    }
+                    ehVoce={id === userId}
+                  />
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 

@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { corDaTampinha } from "@/lib/tampinha";
 import { mobiliaDaMesa } from "@/lib/mobilia";
@@ -88,6 +88,78 @@ export type Sentado = {
   falando: boolean;
 };
 
+/**
+ * A mobília de uma mesa de voz: a luz da luminária, a sombra no chão, as
+ * cadeiras e o tampo, com o que vai escrito em cima dele. É a mesma no salão e
+ * dentro da mesa; muda só o `lado` do quadrado, e tudo cresce junto (ver
+ * `.mobilia` no styles.css). As tampinhas ficam com quem chama, por cima.
+ *
+ * Vazia, a mesa mostra as cadeiras que tem, tortas junto com ela. Ocupada, cada
+ * um puxou a sua: uma cadeira embaixo de cada tampinha, nos mesmos ângulos (a
+ * primeira em cima).
+ */
+export function MobiliaDaMesa({
+  id,
+  lado,
+  sentados,
+  destacada,
+  className,
+  children,
+}: {
+  /** Id da mesa: decide o tampo, a torção e as cadeiras. */
+  id: string;
+  /** Lado do quadrado da mesa, em px. */
+  lado: number;
+  /** Quantas tampinhas estão em volta. */
+  sentados: number;
+  /** Mesa aberta ou onde estou sentado: ganha o contorno âmbar. */
+  destacada?: boolean;
+  /** Arrumação do que vai em cima do tampo. */
+  className?: string;
+  children: ReactNode;
+}) {
+  const mobilia = mobiliaDaMesa(id);
+  const vazia = sentados === 0;
+  const lugares = vazia ? mobilia.cadeiras.length : sentados;
+
+  return (
+    <span
+      className="mobilia absolute inset-0"
+      style={{ "--k": lado / 200, "--giro": `${mobilia.giro}deg` } as CSSProperties}
+    >
+      <span aria-hidden className="mesa-luz" />
+      <span
+        aria-hidden
+        className={cn("mesa-sombra", mobilia.tampo !== "formica-redonda" && "mesa-sombra-quadrada")}
+      />
+      {Array.from({ length: lugares }, (_, i) => (
+        <span
+          key={i}
+          aria-hidden
+          className={cn("cadeira", `cadeira-${mobilia.cadeiras[i % mobilia.cadeiras.length]}`)}
+          style={
+            {
+              "--a": `${(i * 360) / lugares + (vazia ? mobilia.giro : 0)}deg`,
+              "--r": vazia ? 76 : 86,
+            } as CSSProperties
+          }
+        />
+      ))}
+      <span
+        className={cn(
+          "tampo-de-voz flex flex-col items-center justify-center text-center",
+          `tampo-${mobilia.tampo}`,
+          destacada && "tampo-minha",
+          className,
+        )}
+      >
+        {mobilia.tampo === "plastico" && <span aria-hidden className="furo-do-guarda-sol" />}
+        {children}
+      </span>
+    </span>
+  );
+}
+
 /** Posição da cadeira i de n em volta de uma mesa redonda, em % do quadrado. */
 function emVolta(i: number, total: number) {
   const angulo = -Math.PI / 2 + (i * 2 * Math.PI) / Math.max(total, 1);
@@ -163,48 +235,24 @@ export function MesaDoSalao({
     );
   }
 
-  const mobilia = mobiliaDaMesa(id);
-  // Vazia, a mesa mostra as cadeiras que tem, tortas junto com ela. Ocupada, cada
-  // um puxou a sua: uma cadeira embaixo de cada tampinha.
   const vazia = sentados.length === 0;
-  const lugares = vazia ? mobilia.cadeiras.length : Math.min(sentados.length, 10);
 
   return (
     <button
       onClick={onEntrar}
       aria-label={`Mesa de voz ${nome}, ${vazia ? "vazia" : `${sentados.length} sentados`}`}
       className="mesa-voz group relative size-[200px] shrink-0"
-      style={{ "--giro": `${mobilia.giro}deg` } as CSSProperties}
     >
-      <span aria-hidden className="mesa-luz" />
-      <span
-        aria-hidden
-        className={cn("mesa-sombra", mobilia.tampo !== "formica-redonda" && "mesa-sombra-quadrada")}
-      />
-      {Array.from({ length: lugares }, (_, i) => (
-        <span
-          key={i}
-          aria-hidden
-          className={cn("cadeira", `cadeira-${mobilia.cadeiras[i % mobilia.cadeiras.length]}`)}
-          style={
-            {
-              "--a": `${(i * 360) / lugares + (vazia ? mobilia.giro : 0)}deg`,
-              "--r": vazia ? "76px" : "86px",
-            } as CSSProperties
-          }
-        />
-      ))}
-      <span
-        className={cn(
-          "tampo-de-voz flex flex-col items-center justify-center gap-1 px-2 text-center",
-          `tampo-${mobilia.tampo}`,
-          (aberta || minha) && "tampo-minha",
-        )}
+      <MobiliaDaMesa
+        id={id}
+        lado={200}
+        sentados={Math.min(sentados.length, 10)}
+        destacada={!!(aberta || minha)}
+        className="gap-1 px-2"
       >
-        {mobilia.tampo === "plastico" && <span className="furo-do-guarda-sol" />}
         <span className="font-display line-clamp-2 text-lg leading-none tracking-wide">{nome}</span>
         {vazia && <span className="text-papel-tinta/70 text-[10px]">puxe uma cadeira</span>}
-      </span>
+      </MobiliaDaMesa>
       {sentados.slice(0, 10).map((p, i) => {
         const pos = emVolta(i, Math.min(sentados.length, 10));
         return (
