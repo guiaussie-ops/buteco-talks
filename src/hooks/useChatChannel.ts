@@ -6,6 +6,11 @@ import { MESSAGE_COLUMNS, caminhoDaImagem, depoisDe, type Message, type Reacao }
 import { zerarNaoLidas } from "@/hooks/useNaoLidas";
 
 const PAGINA = 100;
+/**
+ * Até quantas mensagens para trás um pulo (busca, citação) carrega de uma vez.
+ * Não passa de 1000: é o teto de linhas por resposta da API do Supabase.
+ */
+const PULO_MAXIMO = 1000;
 /** Quanto tempo o "digitando…" vale sem um aviso novo. */
 const DIGITANDO_VALE_MS = 4000;
 /** De quanto em quanto tempo eu reaviso que continuo digitando. */
@@ -314,6 +319,36 @@ export function useChatChannel({ channelId, serverId, userId }: Opcoes) {
     return lista.length;
   }, [channelId, complementar]);
 
+  /**
+   * Carrega tudo entre `alvo` e a mais antiga já carregada, para dar para
+   * rolar até ela. Devolve se ela está na lista ao final; uma mensagem a mais
+   * de PULO_MAXIMO de distância fica de fora.
+   */
+  const carregarAte = useCallback(
+    async (alvo: Pick<Message, "id" | "created_at">) => {
+      if (messagesRef.current.some((m) => m.id === alvo.id)) return true;
+      const primeira = messagesRef.current[0];
+      let consulta = supabase
+        .from("messages")
+        .select(MESSAGE_COLUMNS)
+        .eq("channel_id", channelId)
+        .gte("created_at", alvo.created_at)
+        .order("created_at", { ascending: true })
+        .limit(PULO_MAXIMO);
+      if (primeira) consulta = consulta.lt("created_at", primeira.created_at);
+      const { data, error } = await consulta;
+      if (error) return false;
+      const lista = (data as Message[]) ?? [];
+      if (lista.length === PULO_MAXIMO || !lista.some((m) => m.id === alvo.id)) return false;
+      setMessages((prev) => [...lista, ...prev]);
+      // Pode ter coisa antes do alvo: a próxima subida até o topo descobre.
+      setTemMais(true);
+      complementar(lista);
+      return true;
+    },
+    [channelId, complementar],
+  );
+
   // -------------------------------------------------------------------------
   // Escrita
   // -------------------------------------------------------------------------
@@ -452,6 +487,7 @@ export function useChatChannel({ channelId, serverId, userId }: Opcoes) {
     carregado,
     temMais,
     carregarAntigas,
+    carregarAte,
     reacoes,
     citadas,
     urls,

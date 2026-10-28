@@ -215,3 +215,45 @@ export function textoDigitando(nomes: string[]) {
   if (nomes.length === 3) return `${nomes[0]}, ${nomes[1]} e ${nomes[2]} estão digitando…`;
   return "Várias pessoas estão digitando…";
 }
+
+/** Uma letra sem acento e em minúscula, do jeito que a busca do banco compara. */
+const semAcento = (c: string) => c.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+
+/**
+ * O resultado da busca cortado em pedaços, com o termo marcado onde aparece.
+ * Compara sem acento e sem caixa, como `buscar_mensagens`, mas devolve o texto
+ * original. Texto comprido começa um pouco antes da primeira ocorrência, com
+ * "…", para o termo não ficar escondido depois do corte da linha.
+ */
+export function destacar(texto: string, termo: string, contexto = 40) {
+  const alvo = [...termo.trim()].map(semAcento).join("");
+  // Cada letra normalizada aponta para a letra original de onde saiu.
+  let normal = "";
+  const origem: number[] = [];
+  for (let i = 0; i < texto.length; i++) {
+    const n = semAcento(texto[i]!);
+    normal += n;
+    for (let k = 0; k < n.length; k++) origem.push(i);
+  }
+
+  const achados: [number, number][] = [];
+  if (alvo) {
+    let de = normal.indexOf(alvo);
+    while (de !== -1) {
+      achados.push([origem[de]!, origem[de + alvo.length - 1]! + 1]);
+      de = normal.indexOf(alvo, de + alvo.length);
+    }
+  }
+
+  const inicio = achados.length > 0 && achados[0]![0] > contexto ? achados[0]![0] - contexto : 0;
+  const pedacos: { texto: string; destaque: boolean }[] = [];
+  if (inicio > 0) pedacos.push({ texto: "…", destaque: false });
+  let desde = inicio;
+  for (const [a, b] of achados) {
+    if (a > desde) pedacos.push({ texto: texto.slice(desde, a), destaque: false });
+    pedacos.push({ texto: texto.slice(a, b), destaque: true });
+    desde = b;
+  }
+  if (desde < texto.length) pedacos.push({ texto: texto.slice(desde), destaque: false });
+  return pedacos;
+}

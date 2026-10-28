@@ -7,8 +7,11 @@ import {
   useRef,
   useState,
 } from "react";
-import { ImagePlus } from "lucide-react";
+import { ImagePlus, Search } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { BuscaNoChat } from "@/components/app/chat/BuscaNoChat";
 import { Bottlecap } from "@/components/Bottlecap";
 import { MiniMesa } from "@/components/app/Mesas";
 import {
@@ -91,6 +94,8 @@ export function ChatPanel({
   const [apagando, setApagando] = useState<Message | null>(null);
   const [arrastando, setArrastando] = useState(false);
   const [carregandoAntigas, setCarregandoAntigas] = useState(false);
+  const [buscando, setBuscando] = useState(false);
+  const celular = useIsMobile();
 
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const divisorRef = useRef<HTMLDivElement | null>(null);
@@ -185,15 +190,31 @@ export function ChatPanel({
     if (coladoRef.current) irProFim();
   }, [irProFim]);
 
-  const irPara = (id: string) => {
+  /** Rola até a mensagem e acende ela por um instante. Falso se não está na tela. */
+  const acender = useCallback((id: string) => {
     const el = document.getElementById(`msg-${id}`);
-    if (!el) {
-      toast.info("Essa mensagem é antiga demais, sobe a conversa até ela.");
-      return;
-    }
+    if (!el) return false;
     el.scrollIntoView({ block: "center", behavior: "smooth" });
     el.classList.add("bg-primary/15");
     window.setTimeout(() => el.classList.remove("bg-primary/15"), 1500);
+    return true;
+  }, []);
+
+  // Mensagem antiga recém-carregada só existe no DOM depois do próximo render.
+  const [alvo, setAlvo] = useState<string | null>(null);
+  useEffect(() => {
+    if (alvo && acender(alvo)) setAlvo(null);
+  }, [alvo, messages, acender]);
+
+  /** Leva o chat até uma mensagem: citada, ou achada na busca. */
+  const irPara = async (id: string, conhecida?: Message) => {
+    if (acender(id)) return;
+    const msg = conhecida ?? porId.get(id) ?? chat.citadas[id];
+    if (msg && (await chat.carregarAte(msg))) {
+      setAlvo(id);
+      return;
+    }
+    toast.info("Essa mensagem é antiga demais, sobe a conversa até ela.");
   };
 
   // Mensagem apagada (por mim em outra aba, ou por um admin) não pode ficar
@@ -247,7 +268,35 @@ export function ChatPanel({
         <MiniMesa tipo="text" />
         <h1 className="font-display text-base tracking-wide">{channelName}</h1>
         <span className="text-muted-foreground ml-2 text-xs">mesa de texto</span>
+        <button
+          type="button"
+          onClick={() => setBuscando((b) => !b)}
+          aria-pressed={buscando}
+          className={cn(
+            "border-border ml-auto flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors",
+            buscando
+              ? "bg-surface-2 text-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-surface-2",
+          )}
+        >
+          <Search className="size-3.5" /> Buscar
+        </button>
       </header>
+
+      {buscando && (
+        <BuscaNoChat
+          channelId={channelId}
+          channelName={channelName}
+          names={names}
+          avatars={avatars}
+          onEscolher={(m) => {
+            // No celular a busca cobre o chat inteiro: sai da frente para mostrar.
+            if (celular) setBuscando(false);
+            void irPara(m.id, m);
+          }}
+          onFechar={() => setBuscando(false)}
+        />
+      )}
 
       <div
         ref={scrollerRef}
@@ -317,7 +366,7 @@ export function ChatPanel({
                   onResponder={() => setResposta(m)}
                   onApagar={(semPerguntar) => (semPerguntar ? void chat.apagar(m) : setApagando(m))}
                   onReagir={(emoji) => void chat.alternarReacao(m.id, emoji)}
-                  onIrPara={irPara}
+                  onIrPara={(id) => void irPara(id)}
                   onImagemCarregou={aoCarregarImagem}
                 />
               </Fragment>

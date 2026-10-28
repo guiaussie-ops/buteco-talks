@@ -676,6 +676,19 @@ export type Database = {
           username: string | null
         }[]
       }
+      buscar_mensagens: {
+        Args: { _channel_id: string; _termo: string }
+        Returns: {
+          channel_id: string
+          content: string
+          created_at: string
+          edited_at: string | null
+          id: string
+          image_path: string | null
+          reply_to: string | null
+          user_id: string
+        }[]
+      }
       butecos_em_comum: {
         Args: { _user_id: string }
         Returns: { icon_emoji: string; name: string; server_id: string }[]

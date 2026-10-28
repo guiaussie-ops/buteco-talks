@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   depoisDe,
+  destacar,
   formatDay,
   isGrouped,
   mencaoEmAndamento,
@@ -120,5 +121,29 @@ describe("reações e digitando", () => {
     expect(textoDigitando(["Ana"])).toBe("Ana está digitando…");
     expect(textoDigitando(["Ana", "Beto"])).toBe("Ana e Beto estão digitando…");
     expect(textoDigitando(["A", "B", "C", "D"])).toBe("Várias pessoas estão digitando…");
+  });
+});
+
+describe("destacar", () => {
+  const marcado = (texto: string, termo: string, contexto?: number) =>
+    destacar(texto, termo, contexto)
+      .map((p) => (p.destaque ? `[${p.texto}]` : p.texto))
+      .join("");
+
+  it("acha sem acento e sem caixa, mas devolve o texto original", () => {
+    expect(marcado("Você vem hoje?", "voce")).toBe("[Você] vem hoje?");
+    expect(marcado("tá chegando", "TA")).toBe("[tá] chegando");
+  });
+
+  it("marca todas as ocorrências", () => {
+    expect(marcado("pix, manda o pix", "pix")).toBe("[pix], manda o [pix]");
+  });
+
+  it("sem ocorrência, devolve o texto inteiro", () => {
+    expect(marcado("nada aqui", "pix")).toBe("nada aqui");
+  });
+
+  it("texto comprido começa perto da primeira ocorrência", () => {
+    expect(marcado("a".repeat(100) + " pix", "pix", 5)).toBe("…aaaa [pix]");
   });
 });
