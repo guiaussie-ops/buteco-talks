@@ -15,6 +15,7 @@ import { ChannelSidebar, type Channel } from "@/components/app/ChannelSidebar";
 import { ChatPanel } from "@/components/app/ChatPanel";
 import { VoicePanel } from "@/components/app/VoicePanel";
 import { TelaCheia } from "@/components/app/TelaCheia";
+import { ComandaRecolhida } from "@/components/app/ComandaRecolhida";
 import { NaTelaAgora, useTemTelaAgora } from "@/components/app/NaTelaAgora";
 import { BarraDoCelular, Gaveta } from "@/components/app/Gaveta";
 import { ColunaDireita } from "@/components/app/ColunaDireita";
@@ -291,10 +292,13 @@ function AppPage() {
     comSom,
   });
 
+  // A mesa de texto debaixo de uma tela cheia não está à vista: o que chega nela
+  // conta como novo, para a comanda recolhida mostrar.
+  const mesaDeTextoAberta = activeChannel?.kind === "text" ? activeChannel : null;
   const naoLidas = useNaoLidas(
     activeServerId,
     uid,
-    activeChannel?.kind === "text" ? activeChannel.id : null,
+    mesaDeTextoAberta && !voice.telaCheia ? mesaDeTextoAberta.id : null,
   );
 
   const createServer = useMutation({
@@ -719,6 +723,21 @@ function AppPage() {
                   telas={
                     temTelas ? (
                       <NaTelaAgora names={names} avatars={avatars} isAdult={isAdult} />
+                    ) : null
+                  }
+                  comanda={
+                    voice.telaCheia && mesaDeTextoAberta ? (
+                      <ComandaRecolhida
+                        channelId={mesaDeTextoAberta.id}
+                        nome={canalAtivo?.name ?? mesaDeTextoAberta.name}
+                        naoLidas={naoLidas[mesaDeTextoAberta.id]?.naoLidas ?? 0}
+                        mencoes={naoLidas[mesaDeTextoAberta.id]?.mencoes ?? 0}
+                        names={names}
+                        onVoltar={() => {
+                          voice.sairDaTelaCheia();
+                          setGaveta(null);
+                        }}
+                      />
                     ) : null
                   }
                   mostrarParticipantes={celular || mostrarParticipantes}

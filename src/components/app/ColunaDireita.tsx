@@ -19,10 +19,13 @@ export function ColunaDireita({
   participantes,
   mostrarParticipantes,
   onMostrarParticipantes,
+  comanda,
   comSino = true,
 }: {
   /** As transmissões, ou null quando ninguém está transmitindo. */
   telas: ReactNode | null;
+  /** A mesa de texto recolhida enquanto uma transmissão está em tela cheia. */
+  comanda?: ReactNode;
   participantes: ReactNode;
   mostrarParticipantes: boolean;
   onMostrarParticipantes: () => void;
@@ -64,6 +67,7 @@ export function ColunaDireita({
           {telas}
         </div>
       )}
+      {comanda}
       {mostrarParticipantes ? (
         participantes
       ) : (
