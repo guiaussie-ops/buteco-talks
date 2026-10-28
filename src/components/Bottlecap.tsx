@@ -25,7 +25,7 @@ export function Bottlecap({ name, className, speaking, src }: Props) {
   return (
     <span
       className={cn(
-        "relative inline-flex size-9 shrink-0 items-center justify-center rounded-full",
+        "relative inline-flex aspect-square size-9 shrink-0 items-center justify-center overflow-hidden rounded-full",
         speaking && "speaking-pulse",
         className,
       )}
@@ -35,10 +35,14 @@ export function Bottlecap({ name, className, speaking, src }: Props) {
       aria-hidden
     >
       {src ? (
+        // Tamanho explícito, não só inset: <img> com posição absoluta não estica
+        // até as bordas, fica no tamanho dela (e o height:auto do Tailwind
+        // mantém a proporção). Aí o object-cover não recortava nada e a foto
+        // retangular sobrava dentro do círculo.
         <img
           src={src}
           alt=""
-          className="absolute inset-[13%] rounded-full object-cover"
+          className="absolute top-[13%] left-[13%] size-[74%] max-w-none rounded-full object-cover object-center"
           loading="lazy"
         />
       ) : (
