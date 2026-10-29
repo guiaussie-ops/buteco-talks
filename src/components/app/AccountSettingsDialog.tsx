@@ -19,11 +19,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { VoiceVideoSettings } from "@/components/app/VoiceVideoSettings";
+import { RecorteDeFoto } from "@/components/app/RecorteDeFoto";
+import { FOTO_TIPOS, problemaNaFoto } from "@/lib/recorte";
 import { cn } from "@/lib/utils";
 
 const BIO_MAX = 280;
-const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
-const AVATAR_TIPOS = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
 type Props = {
   open: boolean;
@@ -48,6 +48,8 @@ export function AccountSettingsDialog({ open, onOpenChange }: Props) {
   const [bio, setBio] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
   const [uploading, setUploading] = useState(false);
+  /** A foto escolhida, esperando o recorte. Nada sobe antes de aplicar. */
+  const [paraRecortar, setParaRecortar] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const [email, setEmail] = useState("");
@@ -94,30 +96,31 @@ export function AccountSettingsDialog({ open, onOpenChange }: Props) {
     toast.success("Perfil atualizado.");
   };
 
-  const enviarAvatar = async (file: File) => {
-    if (!AVATAR_TIPOS.includes(file.type)) {
-      toast.error("Manda uma imagem JPG, PNG, WEBP ou GIF.");
+  const escolherFoto = (file: File) => {
+    const problema = problemaNaFoto(file);
+    if (problema) {
+      toast.error(problema);
       return;
     }
-    if (file.size > AVATAR_MAX_BYTES) {
-      toast.error("A imagem passou de 2 MB. Escolhe uma menor.");
-      return;
-    }
+    setParaRecortar(file);
+  };
 
+  /** Sobe a foto já recortada e tira do bucket a anterior, se tinha outra extensão. */
+  const enviarAvatar = async (foto: Blob) => {
     setUploading(true);
     const uid = session!.user.id;
-    const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+    const nomeDoArquivo = foto.type === "image/webp" ? "avatar.webp" : "avatar.jpg";
     // O caminho começa pelo id: é o que a policy do bucket confere.
-    const path = `${uid}/avatar.${ext}`;
+    const path = `${uid}/${nomeDoArquivo}`;
 
     const { error: upErr } = await supabase.storage
       .from("avatars")
-      .upload(path, file, { upsert: true, contentType: file.type });
+      .upload(path, foto, { upsert: true, contentType: foto.type });
 
     if (upErr) {
       setUploading(false);
       toast.error("Não consegui subir a foto.");
-      return;
+      return false;
     }
 
     // A URL pública é estável, então o navegador serviria a foto antiga do
@@ -130,13 +133,24 @@ export function AccountSettingsDialog({ open, onOpenChange }: Props) {
       .update({ avatar_url: url })
       .eq("id", uid);
 
-    setUploading(false);
     if (dbErr) {
+      setUploading(false);
       toast.error("A foto subiu, mas não consegui salvar no perfil.");
-      return;
+      return false;
     }
+
+    // Só depois do perfil apontar para a nova: a antiga (avatar.png de antes do
+    // recorte, ou o .jpg de um navegador sem WebP) não fica órfã no bucket.
+    const { data: arquivos } = await supabase.storage.from("avatars").list(uid);
+    const sobras = (arquivos ?? []).filter((f) => f.name !== nomeDoArquivo);
+    if (sobras.length) {
+      await supabase.storage.from("avatars").remove(sobras.map((f) => `${uid}/${f.name}`));
+    }
+
+    setUploading(false);
     await recarregar();
     toast.success("Foto no capricho!");
+    return true;
   };
 
   const removerAvatar = async () => {
@@ -243,7 +257,7 @@ export function AccountSettingsDialog({ open, onOpenChange }: Props) {
               <div className="min-w-0 flex-1 space-y-2">
                 <p className="text-sm font-medium">Sua tampinha</p>
                 <p className="text-muted-foreground text-xs">
-                  Sem foto, a tampinha sai da inicial do apelido. JPG, PNG, WEBP ou GIF, até 2 MB.
+                  Sem foto, a tampinha sai da inicial do apelido. JPG, PNG, WEBP ou GIF, até 8 MB.
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -273,13 +287,13 @@ export function AccountSettingsDialog({ open, onOpenChange }: Props) {
                 <input
                   ref={fileRef}
                   type="file"
-                  accept={AVATAR_TIPOS.join(",")}
+                  accept={FOTO_TIPOS.join(",")}
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     // Zera o input: escolher o mesmo arquivo de novo precisa disparar.
                     e.target.value = "";
-                    if (file) void enviarAvatar(file);
+                    if (file) escolherFoto(file);
                   }}
                 />
               </div>
@@ -394,6 +408,11 @@ export function AccountSettingsDialog({ open, onOpenChange }: Props) {
           </TabsContent>
         </Tabs>
       </DialogContent>
+      <RecorteDeFoto
+        arquivo={paraRecortar}
+        onCancelar={() => setParaRecortar(null)}
+        onAplicar={enviarAvatar}
+      />
     </Dialog>
   );
 }
