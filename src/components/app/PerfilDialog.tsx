@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Heart, MessageCircle, Pencil, Smile, Snowflake, Trash2 } from "lucide-react";
+import { Heart, MessageCircle, Pencil, Smile, Snowflake, Star, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { usePerfil } from "@/lib/perfil";
@@ -110,6 +110,31 @@ export function PerfilDialog({
     },
   });
 
+  const fas = useQuery({
+    queryKey: ["fas", id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("fas_do_perfil", { _user_id: id! });
+      if (error) throw error;
+      return data ?? 0;
+    },
+  });
+
+  const souFa = useQuery({
+    queryKey: ["sou-fa", id],
+    enabled: !!id && !souEu,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("fas")
+        .select("para_id")
+        .eq("para_id", id!)
+        .eq("de_id", meuId)
+        .maybeSingle();
+      if (error) throw error;
+      return !!data;
+    },
+  });
+
   const recados = useQuery({
     queryKey: ["recados", id],
     enabled: !!id,
@@ -155,6 +180,20 @@ export function PerfilDialog({
       await qc.invalidateQueries({ queryKey: ["notas", id] });
     },
     onError: () => toast.error("Não consegui registrar o voto."),
+  });
+
+  const alternarFa = useMutation({
+    mutationFn: async () => {
+      const { error } = souFa.data
+        ? await supabase.from("fas").delete().match({ de_id: meuId, para_id: id! })
+        : await supabase.from("fas").insert({ de_id: meuId, para_id: id! });
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["sou-fa", id] });
+      await qc.invalidateQueries({ queryKey: ["fas", id] });
+    },
+    onError: () => toast.error("Não deu certo. Tenta de novo."),
   });
 
   const mandarRecado = useMutation({
@@ -206,6 +245,12 @@ export function PerfilDialog({
                 <DialogDescription className="text-papel-tinta/70 text-xs">
                   @{p?.username}
                 </DialogDescription>
+                {fas.isSuccess && (
+                  <p className="mt-1 flex items-center gap-1 text-xs">
+                    <Star className="size-3.5 fill-current text-[oklch(0.6_0.13_75)]" />
+                    fãs: <b>{fas.data}</b>
+                  </p>
+                )}
               </div>
               {p?.bio && <p className="text-sm leading-relaxed whitespace-pre-wrap">{p.bio}</p>}
               {(emComum.data?.length ?? 0) > 0 && (
@@ -236,15 +281,33 @@ export function PerfilDialog({
                   <Pencil className="size-4" /> Editar meu perfil
                 </Button>
               ) : (
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    fecharPerfil();
-                    abrirConversa(id!);
-                  }}
-                >
-                  <MessageCircle className="size-4" /> Conversar
-                </Button>
+                <>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      fecharPerfil();
+                      abrirConversa(id!);
+                    }}
+                  >
+                    <MessageCircle className="size-4" /> Conversar
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!souFa.isSuccess || alternarFa.isPending}
+                    onClick={() => alternarFa.mutate()}
+                    aria-pressed={!!souFa.data}
+                    className="border-papel-linha text-papel-tinta bg-transparent"
+                  >
+                    <Star
+                      className={cn(
+                        "size-4",
+                        souFa.data && "fill-current text-[oklch(0.6_0.13_75)]",
+                      )}
+                    />
+                    {souFa.data ? "Sou fã" : "Virar fã"}
+                  </Button>
+                </>
               )}
             </aside>
 

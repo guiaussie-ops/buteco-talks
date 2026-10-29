@@ -168,6 +168,39 @@ export type Database = {
           },
         ]
       }
+      fas: {
+        Row: {
+          created_at: string
+          de_id: string
+          para_id: string
+        }
+        Insert: {
+          created_at?: string
+          de_id: string
+          para_id: string
+        }
+        Update: {
+          created_at?: string
+          de_id?: string
+          para_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fas_de_id_fkey"
+            columns: ["de_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fas_para_id_fkey"
+            columns: ["para_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       presencas_em_encontros: {
         Row: {
           atualizado_em: string
@@ -710,6 +743,7 @@ export type Database = {
         Args: { _banir?: boolean; _motivo?: string; _server_id: string; _user_id: string }
         Returns: undefined
       }
+      fas_do_perfil: { Args: { _user_id: string }; Returns: number }
       historico_da_gestao: {
         Args: { _antes_id?: number; _limite?: number; _server_id: string }
         Returns: {
